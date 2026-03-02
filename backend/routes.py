@@ -59,7 +59,7 @@ HTTP_ERROR_CODE_MAP = {
 bp = Blueprint("quiz", __name__)
 
 
-def question_to_dict(q: Question) -> Dict:
+def question_to_dict(q: Question, include_answer: bool = False) -> Dict:
     payload = {
         "id": q.id,
         "stem": q.stem,
@@ -67,7 +67,8 @@ def question_to_dict(q: Question) -> Dict:
         "category": getattr(q, "category", None),
         "analysis": getattr(q, "analysis", None),
     }
-    payload["answer"] = q.answer
+    if include_answer:
+        payload["answer"] = q.answer
     return payload
 
 
@@ -751,7 +752,7 @@ def questions():
             {
                 "user_id": user_id,
                 "quiz_id": quiz_id,
-                "questions": [question_to_dict(q) for q in questions],
+                "questions": [question_to_dict(q, include_answer=False) for q in questions],
                 "total": len(questions),
                 "bank_size": g.db.query(Question).count(),
             }
@@ -794,16 +795,13 @@ def submit():
 
     user_id = data.get("user_id")
     quiz_id = data.get("quiz_id")
-    score = data.get("score")
-    total = data.get("total", g.db.query(Question).count())
-    wrong = data.get("wrong")
     answers = data.get("answers")
 
     if not user_id or not quiz_id:
         return jsonify({"error": "user_id and quiz_id are required"}), 400
 
-    if not isinstance(score, int) and not isinstance(answers, list):
-        return jsonify({"error": "score (int) or answers array required"}), 400
+    if not isinstance(answers, list):
+        return jsonify({"error": "answers array required"}), 400
 
     entry = ACTIVE_QUIZZES.get(quiz_id)
     if not entry:
@@ -816,18 +814,10 @@ def submit():
         del ACTIVE_QUIZZES[quiz_id]
         return jsonify({"error": "quiz expired"}), 403
 
-    if isinstance(answers, list):
-        graded = grade_submission(answers)
-        score_val = graded["score"]
-        wrong_list = graded["wrong"]
-        total_val = entry.get("count", graded["total"])
-    else:
-        score_val = score
-        try:
-            total_val = int(total)
-        except (TypeError, ValueError):
-            total_val = entry.get("count", g.db.query(Question).count())
-        wrong_list = wrong if isinstance(wrong, list) else []
+    graded = grade_submission(answers)
+    score_val = graded["score"]
+    wrong_list = graded["wrong"]
+    total_val = entry.get("count", graded["total"])
 
     if entry.get("count"):
         total_val = entry["count"]
@@ -876,6 +866,7 @@ def store_score_record(db: Session, user_id: str, quiz_id: str, score: int, tota
 
 @bp.route("/api/questions/bank")
 @login_required(api=True)
+@role_required(["teacher", "admin"])
 def bank_info():
     limit, offset = parse_pagination(default_limit=20, max_limit=100)
     category = (request.args.get("category") or "").strip()
@@ -891,7 +882,7 @@ def bank_info():
     rows = query.offset(offset).limit(limit).all()
     return api_ok(
         {
-            "questions": [question_to_dict(q) for q in rows],
+            "questions": [question_to_dict(q, include_answer=True) for q in rows],
             "total": total,
             "default_count": DEFAULT_QUESTION_COUNT,
             "limit": limit,
@@ -902,6 +893,7 @@ def bank_info():
 
 @bp.route("/api/questions", methods=["GET"])
 @login_required(api=True)
+@role_required(["teacher", "admin"])
 def list_questions():
     limit, offset = parse_pagination(default_limit=20, max_limit=100)
     category = (request.args.get("category") or "").strip()
@@ -915,7 +907,7 @@ def list_questions():
     query = query.order_by(Question.id.asc())
     total = query.count()
     rows = query.offset(offset).limit(limit).all()
-    return api_ok({"items": [question_to_dict(q) for q in rows], "total": total, "limit": limit, "offset": offset})
+    return api_ok({"items": [question_to_dict(q, include_answer=True) for q in rows], "total": total, "limit": limit, "offset": offset})
 
 
 @bp.route("/api/questions/import", methods=["POST"])
@@ -3940,5 +3932,3 @@ def teacher_class_analysis(class_id):
 @role_required(["teacher", "admin"])
 def download_export(filename):
     return send_from_directory(EXPORT_DIR, filename, as_attachment=True)
-
-
