@@ -1,0 +1,222 @@
+[
+  {
+    "id": "Q1",
+    "stem": "Which sentence uses the present perfect tense correctly?",
+    "options": [
+      "She has finished her homework already.",
+      "She finish her homework already.",
+      "She finishes her homework already.",
+      "She finished her homework already."
+    ],
+    "answer": 0
+  },
+  {
+    "id": "Q2",
+    "stem": "Choose the correct article: He is ___ honest person to work with.",
+    "options": [
+      "a",
+      "an",
+      "the",
+      "no article needed"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "Q3",
+    "stem": "Select the sentence with proper subject-verb agreement.",
+    "options": [
+      "Neither of the answers are correct.",
+      "One of the students were late.",
+      "Each of the cookies is baked fresh.",
+      "The team have won the match."
+    ],
+    "answer": 2
+  },
+  {
+    "id": "Q4",
+    "stem": "Which option is the correct past tense form of 'to fly'?",
+    "options": [
+      "flied",
+      "flyed",
+      "flew",
+      "flown"
+    ],
+    "answer": 2
+  },
+  {
+    "id": "Q5",
+    "stem": "Pick the sentence that uses a conditional (Type 2) structure.",
+    "options": [
+      "If it rains, we will cancel the trip.",
+      "If I knew the answer, I would tell you.",
+      "If you finished early, call me.",
+      "If she studies, she passes."
+    ],
+    "answer": 1
+  },
+  {
+    "id": "Q6",
+    "stem": "Which sentence correctly uses the word 'whose'?",
+    "options": [
+      "Whose jacket is this on the chair?",
+      "Who's jacket is this on the chair?",
+      "Who is jacket is this on the chair?",
+      "Whom jacket is this on the chair?"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "Q7",
+    "stem": "Choose the correctly punctuated sentence.",
+    "options": [
+      "I came, I saw I conquered.",
+      "I came; I saw, I conquered.",
+      "I came, I saw, I conquered.",
+      "I came I saw, I conquered."
+    ],
+    "answer": 2
+  },
+  {
+    "id": "Q8",
+    "stem": "Select the sentence that uses the passive voice.",
+    "options": [
+      "The chef cooked the meal quickly.",
+      "The meal was cooked quickly by the chef.",
+      "The chef cooks quickly every night.",
+      "The meal cooks quickly for the chef."
+    ],
+    "answer": 1
+  },
+  {
+    "id": "Q9",
+    "stem": "Which word best completes the sentence? She is responsible ___ organizing the workshop.",
+    "options": [
+      "of",
+      "for",
+      "with",
+      "about"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "Q10",
+    "stem": "Choose the correct reported speech transformation: \"I am learning Python,\" she said.",
+    "options": [
+      "She said that she was learning Python.",
+      "She said that she is learning Python.",
+      "She said that she has learned Python.",
+      "She said that she learn Python."
+    ],
+    "answer": 0
+  },
+  {
+    "id": "Q11",
+    "stem": "Pick the correctly capitalized sentence.",
+    "options": [
+      "last summer we visited Seoul and Busan.",
+      "Last summer we visited Seoul and Busan.",
+      "Last Summer we visited seoul and busan.",
+      "Last summer we visited seoul and busan."
+    ],
+    "answer": 1
+  },
+  {
+    "id": "Q12",
+    "stem": "Which sentence correctly uses a gerund?",
+    "options": [
+      "To read books are my favorite hobby.",
+      "Reading books is my favorite hobby.",
+      "Read books is my favorite hobby.",
+      "Reads books is my favorite hobby."
+    ],
+    "answer": 1
+  },
+  {
+    "id": "Q13",
+    "stem": "Select the best transition word to connect the ideas: \"She was tired; ___, she kept working.\"",
+    "options": [
+      "however",
+      "because",
+      "meanwhile",
+      "otherwise"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "Q14",
+    "stem": "Which sentence uses the future continuous tense?",
+    "options": [
+      "I will see you at the party.",
+      "I will be waiting for you at the station.",
+      "I will waited for you at the station.",
+      "I am wait you at the station."
+    ],
+    "answer": 1
+  },
+  {
+    "id": "Q15",
+    "stem": "Choose the sentence that correctly uses a phrasal verb.",
+    "options": [
+      "Please look the word on in the dictionary.",
+      "Please look up the word in the dictionary.",
+      "Please look the word up in the dictionary.",
+      "Please look the word in the dictionary up."
+    ],
+    "answer": 1
+  },
+  {
+    "id": "Q16",
+    "stem": "Which option correctly completes the sentence? The experiment ___ carefully documented.",
+    "options": [
+      "was",
+      "is",
+      "were",
+      "be"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "Q17",
+    "stem": "Pick the correct comparative structure.",
+    "options": [
+      "This task is more easy than the last one.",
+      "This task is easier than the last one.",
+      "This task is most easy than the last one.",
+      "This task is easy than the last one."
+    ],
+    "answer": 1
+  },
+  {
+    "id": "Q18",
+    "stem": "Choose the best closing sentence for a formal email.",
+    "options": [
+      "Talk soon!",
+      "See ya!",
+      "Thanks a bunch!",
+      "Thank you for your time and consideration."
+    ],
+    "answer": 3
+  },
+  {
+    "id": "Q19",
+    "stem": "Which word is an antonym of 'scarce'?",
+    "options": [
+      "rare",
+      "ample",
+      "limited",
+      "few"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "Q20",
+    "stem": "Select the sentence that correctly uses a relative clause.",
+    "options": [
+      "The laptop which I bought it last week is fast.",
+      "The laptop I bought last week is fast.",
+      "The laptop that bought last week is fast.",
+      "The laptop, I bought last week, is fast."
+    ],
+    "answer": 1
+  }
+]

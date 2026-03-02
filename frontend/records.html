@@ -1,0 +1,87 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>记录中心 | 测验系统</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="cx-app">
+  <div class="cx-home-shell">
+    <header class="cx-topbar"><div class="cx-topbar-inner"><div class="cx-school-title">测验系统</div><div class="cx-top-actions"><a href="/logout" class="cx-logout-btn">退出登录</a></div></div></header>
+    <div class="cx-main-layout">
+      <aside class="cx-sidebar" aria-label="主导航">
+        <div class="cx-avatar-card"><div class="cx-avatar-circle">RC</div><p class="cx-avatar-name">记录中心</p></div>
+        <nav class="cx-side-menu"><a href="/">首页</a><a href="/submit">提交</a><a class="active" href="/records">记录</a><a href="/admin">管理</a></nav>
+      </aside>
+      <main class="cx-content-area">
+        <div class="cx-content-stack">
+          <section class="cx-course-board compact"><h1>提交记录</h1><p>按条数或记录ID查询并查看详情。</p></section>
+          <section class="section">
+            <div class="row"><div><label for="limit">条数</label><input id="limit" type="number" value="20" min="1" max="200" /></div><div><label for="record-id">记录ID（可选）</label><input id="record-id" /></div><button class="btn" id="fetch-btn">查询</button><span class="status" id="status"></span></div>
+          </section>
+          <div class="cx-grid-2 tight">
+            <section class="section"><h2>记录列表</h2><div class="table-scroll"><table class="table" id="records-table"><thead><tr><th>时间</th><th>用户</th><th>分数</th><th>IP地址</th><th>测验ID</th></tr></thead><tbody></tbody></table></div></section>
+            <section class="section"><h2>记录详情</h2><div id="detail-cards" class="stack"></div></section>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script>
+    const fetchBtn = document.getElementById('fetch-btn');
+    const statusEl = document.getElementById('status');
+    const recordsTable = document.querySelector('#records-table tbody');
+    const detailCards = document.getElementById('detail-cards');
+
+    fetchBtn.addEventListener('click', loadRecords);
+    loadRecords();
+
+    async function loadRecords() {
+      statusEl.textContent = '加载中...';
+      statusEl.className = 'status';
+      const limit = Math.max(1, Number(document.getElementById('limit').value || 20));
+      const recordId = document.getElementById('record-id').value.trim();
+      const q = new URLSearchParams({ limit: String(limit) });
+      if (recordId) q.set('id', recordId);
+      try {
+        const res = await fetch('/records.json?' + q.toString());
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '查询失败');
+        renderList(data.records || []);
+        renderDetail((data.records || []).slice(0, 1));
+        statusEl.textContent = '已加载';
+        statusEl.className = 'status ok';
+      } catch (e) {
+        statusEl.textContent = e.message;
+        statusEl.className = 'status error';
+        renderList([]);
+        renderDetail([]);
+      }
+    }
+
+    function renderList(list) {
+      recordsTable.innerHTML = '';
+      if (!list.length) return (recordsTable.innerHTML = '<tr><td colspan="5" class="muted">暂无记录</td></tr>');
+      list.forEach((r) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td>${r.timestamp || ''}</td><td>${r.user_id || '-'}</td><td>${(r.score ?? '-') + ' / ' + (r.total ?? '-')}</td><td>${r.client_ip || '-'}</td><td>${r.quiz_id || '-'}</td>`;
+        row.addEventListener('click', () => renderDetail([r]));
+        recordsTable.appendChild(row);
+      });
+    }
+
+    function renderDetail(list) {
+      if (!list.length) return (detailCards.innerHTML = '<div class="muted">请选择一条记录查看详情</div>');
+      detailCards.innerHTML = '';
+      list.forEach((r) => {
+        const wrongList = Array.isArray(r.wrong) ? r.wrong.map(w => `<li>题号: ${w.id || '-'} · 正确: ${w.correct ?? '-'} · 你的: ${w.your ?? '-'}</li>`).join('') : '';
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `<div class="pill">记录ID</div><h3 style="margin:6px 0 4px;">${r.id || '-'}</h3><p class="muted">用户: ${r.user_id || '-'} · 测验ID: ${r.quiz_id || '-'}</p><p class="muted">分数: ${r.score ?? '-'} / ${r.total ?? '-'} · IP地址: ${r.client_ip || '-'}</p><p class="muted">时间: ${r.timestamp || '-'}</p>${wrongList ? `<ul style="margin:6px 0 0 14px; padding:0; list-style:disc; color:var(--muted);">${wrongList}</ul>` : '<p class="muted">无错题</p>'}`;
+        detailCards.appendChild(card);
+      });
+    }
+  </script>
+</body>
+</html>
