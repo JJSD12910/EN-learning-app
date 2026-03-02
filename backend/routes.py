@@ -733,11 +733,12 @@ def admin_page():
 
 @bp.route("/questions")
 @login_required(api=True)
+@role_required(["client"])
 def questions():
     try:
-        user_id = request.args.get("user_id")
+        user_id = getattr(g, "current_user", None)
         if not user_id:
-            return jsonify({"error": "user_id required"}), 400
+            return jsonify({"error": "unauthorized"}), 401
         count_param = request.args.get("count")
         category = (request.args.get("category") or "").strip() or None
         try:
@@ -746,8 +747,14 @@ def questions():
         except (TypeError, ValueError):
             count_int = DEFAULT_QUESTION_COUNT
         quiz_id = uuid.uuid4().hex
-        ACTIVE_QUIZZES[quiz_id] = {"user_id": user_id, "ts": time.time(), "count": count_int}
         questions = pick_questions(g.db, count_int, category=category)
+        question_ids = [q.id for q in questions]
+        ACTIVE_QUIZZES[quiz_id] = {
+            "user_id": user_id,
+            "ts": time.time(),
+            "count": len(question_ids),
+            "question_ids": question_ids,
+        }
         return jsonify(
             {
                 "user_id": user_id,
@@ -793,12 +800,15 @@ def submit():
     if data is None:
         return jsonify({"error": "invalid json"}), 400
 
-    user_id = data.get("user_id")
+    user_id = getattr(g, "current_user", None)
+    request_user_id = data.get("user_id")
     quiz_id = data.get("quiz_id")
     answers = data.get("answers")
 
     if not user_id or not quiz_id:
-        return jsonify({"error": "user_id and quiz_id are required"}), 400
+        return jsonify({"error": "quiz_id is required"}), 400
+    if request_user_id and str(request_user_id) != str(user_id):
+        return jsonify({"error": "user_id mismatch"}), 403
 
     if not isinstance(answers, list):
         return jsonify({"error": "answers array required"}), 400
@@ -814,13 +824,16 @@ def submit():
         del ACTIVE_QUIZZES[quiz_id]
         return jsonify({"error": "quiz expired"}), 403
 
-    graded = grade_submission(answers)
+    expected_question_ids = entry.get("question_ids") or []
+    if not isinstance(expected_question_ids, list) or not expected_question_ids:
+        return jsonify({"error": "quiz session is invalid"}), 400
+
+    graded = grade_submission(answers, expected_question_ids)
+    if graded.get("error"):
+        return jsonify({"error": graded["error"]}), 400
     score_val = graded["score"]
     wrong_list = graded["wrong"]
-    total_val = entry.get("count", graded["total"])
-
-    if entry.get("count"):
-        total_val = entry["count"]
+    total_val = graded["total"]
 
     print(f"[submit] user={user_id}, quiz_id={quiz_id}, score={score_val}")
     del ACTIVE_QUIZZES[quiz_id]
@@ -830,13 +843,30 @@ def submit():
     return jsonify({"status": "ok", "record_id": record_id})
 
 
-def grade_submission(answers):
-    total = len(answers or [])
+def grade_submission(answers, expected_question_ids):
+    expected_ids = [str(qid) for qid in (expected_question_ids or []) if qid is not None]
+    expected_set = set(expected_ids)
+    if not expected_set:
+        return {"error": "quiz session has no questions"}
+
+    answer_map = {}
+    for answer in answers or []:
+        if not isinstance(answer, dict):
+            return {"error": "answers must be objects"}
+        qid = str(answer.get("id") or "").strip()
+        if not qid:
+            return {"error": "answer id is required"}
+        if qid not in expected_set:
+            return {"error": "answers contain invalid question id"}
+        if qid in answer_map:
+            return {"error": "duplicate question answers are not allowed"}
+        answer_map[qid] = answer.get("choice")
+
+    total = len(expected_ids)
     correct = 0
     wrong = []
-    for answer in answers or []:
-        qid = answer.get("id")
-        choice = answer.get("choice")
+    for qid in expected_ids:
+        choice = answer_map.get(qid)
         question = g.db.query(Question).filter(Question.id == qid).first()
         if question is None:
             continue
