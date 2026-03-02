@@ -1,0 +1,124 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>登录 | 测验系统</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="cx-login">
+  <div class="cx-login-wrap">
+    <div class="cx-login-panel">
+      <section class="cx-login-left" aria-label="平台介绍">
+        <div class="cx-login-left-head">
+          <div class="cx-login-brand">测验系统</div>
+          <span class="cx-login-tag">需要登录</span>
+        </div>
+        <h1>欢迎使用教师测验平台</h1>
+        <p>统一题库、考试发布、成绩追踪、错题强化。</p>
+        <div class="cx-illus-shell" aria-hidden="true">
+          <div class="cx-illus-ring"></div>
+          <div class="cx-illus-ring cx-illus-ring-b"></div>
+          <div class="cx-illus-card"></div>
+          <div class="cx-illus-chip cx-chip-a"></div>
+          <div class="cx-illus-chip cx-chip-b"></div>
+          <div class="cx-illus-chip cx-chip-c"></div>
+          <div class="cx-illus-chip cx-chip-d"></div>
+        </div>
+        <div class="cx-login-slogan">本地部署 · 多端可用 · 数据闭环</div>
+      </section>
+
+      <section class="cx-login-right" aria-label="账号登录表单">
+        <div class="cx-login-right-head">
+          <div class="pill">账号登录</div>
+        </div>
+
+        <div class="cx-role-row">
+          <button class="btn secondary" type="button" data-role="admin">管理员</button>
+          <button class="btn secondary" type="button" data-role="teacher">教师</button>
+        </div>
+        <div class="status" id="role-hint">管理员示例：admin / admin123</div>
+
+        <div class="stack cx-login-form">
+          <div>
+            <label for="username">用户名</label>
+            <input id="username" type="text" placeholder="admin" autocomplete="username" />
+          </div>
+          <div>
+            <label for="password">密码</label>
+            <input id="password" type="password" placeholder="********" autocomplete="current-password" />
+          </div>
+          <div class="row">
+            <button class="btn cx-login-submit" id="login-btn">登录</button>
+          </div>
+          <div class="status" id="status" role="alert" aria-live="polite"></div>
+        </div>
+
+        <div class="footer">测验系统 - 仅本地使用 - 需要 Cookie</div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const usernameEl = document.getElementById('username');
+    const passwordEl = document.getElementById('password');
+    const roleHint = document.getElementById('role-hint');
+
+    document.getElementById('login-btn').addEventListener('click', login);
+    document.querySelectorAll('[data-role]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const role = el.dataset.role;
+        if (role === 'teacher') {
+          usernameEl.value = 'teacher';
+          passwordEl.value = 'teacher123';
+          roleHint.textContent = '教师示例：teacher / teacher123';
+        } else {
+          usernameEl.value = 'admin';
+          passwordEl.value = 'admin123';
+          roleHint.textContent = '管理员示例：admin / admin123';
+        }
+      });
+    });
+
+    function targetByRole(role) {
+      if (role === 'admin') return '/admin';
+      if (role === 'teacher') return '/teacher';
+      return '/';
+    }
+
+    async function login() {
+      statusEl.textContent = '登录中...';
+      statusEl.className = 'status';
+      try {
+        const res = await fetch('/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: usernameEl.value.trim(), password: passwordEl.value })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          statusEl.textContent = data.error || '登录失败';
+          statusEl.className = 'status error';
+          return;
+        }
+        statusEl.textContent = '登录成功，正在跳转...';
+        statusEl.className = 'status ok';
+        setTimeout(() => (window.location.href = targetByRole(data.role)), 400);
+      } catch (err) {
+        statusEl.textContent = '请求失败: ' + err;
+        statusEl.className = 'status error';
+      }
+    }
+
+    (async function checkSession() {
+      try {
+        const res = await fetch('/auth/status');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.authenticated) window.location.href = targetByRole(data.role);
+      } catch (err) {}
+    })();
+  </script>
+</body>
+</html>
