@@ -2953,15 +2953,15 @@ def teacher_exam_question_stats(exam_id):
             option_index = int(row.your)
         except (TypeError, ValueError):
             continue
-        option_limit = option_limit_map.get(row.question_id, 4)
-        if option_index < 0 or option_index >= option_limit:
+        if option_index < 0:
             continue
         item = stats_map.setdefault(
             row.question_id,
-            {"answer_count": 0, "correct_count": 0, "option_counts": {}},
+            {"answer_count": 0, "correct_count": 0, "option_counts": {}, "max_option_index": -1},
         )
         item["answer_count"] += 1
         item["option_counts"][option_index] = int(item["option_counts"].get(option_index, 0)) + 1
+        item["max_option_index"] = max(int(item.get("max_option_index", -1)), option_index)
         if int(row.is_correct or 0) == 1:
             item["correct_count"] += 1
 
@@ -2976,15 +2976,22 @@ def teacher_exam_question_stats(exam_id):
         answer_count = int(stat.get("answer_count", 0))
         correct_count = int(stat.get("correct_count", 0))
         option_counts = stat.get("option_counts", {})
-        option_total = max(4, len(options))
+        max_option_index = max(int(stat.get("max_option_index", -1)), max(option_counts.keys(), default=-1))
+        option_total = max(4, len(options), max_option_index + 1)
         option_stats = []
         for option_index in range(option_total):
             option_label = chr(65 + option_index) if option_index < 26 else str(option_index + 1)
+            if option_index < len(options):
+                option_text = options[option_index]
+            elif int(option_counts.get(option_index, 0)) > 0:
+                option_text = f"[historical option {option_index + 1}]"
+            else:
+                option_text = ""
             option_stats.append(
                 {
                     "index": option_index,
                     "label": option_label,
-                    "text": options[option_index] if option_index < len(options) else "",
+                    "text": option_text,
                     "count": int(option_counts.get(option_index, 0)),
                     "is_correct": option_index == int(question.answer or 0),
                 }
