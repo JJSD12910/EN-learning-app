@@ -152,7 +152,7 @@ async function loadProfile() {
   if (!data.authenticated) return (location.href = '/login');
   if (data.role !== 'admin') return (location.href = '/');
   $('user-label').textContent = data.user || '-';
-  $('role-label').textContent = data.role || '-';
+  $('role-label').textContent = data.role === 'admin' ? '\u7ba1\u7406\u5458' : (data.role || '-');
 }
 
 function formatDate(v) {

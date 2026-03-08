@@ -6,9 +6,9 @@
   <title>提交中心 | 测验系统</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body class="cx-app">
+<body class="cx-app cx-client">
   <div class="cx-home-shell">
-    <header class="cx-topbar"><div class="cx-topbar-inner"><div class="cx-school-title">测验系统</div><div class="cx-top-actions"><a href="/logout" class="cx-logout-btn">退出登录</a></div></div></header>
+    <header class="cx-topbar"><div class="cx-topbar-inner"><div class="cx-school-title">测验系统</div><div class="cx-top-actions"><span class="cx-top-chip">用户：<strong id="user-label">-</strong></span><span class="cx-top-chip">角色：<strong id="role-label">-</strong></span><a href="/logout" class="cx-logout-btn">退出登录</a></div></div></header>
     <div class="cx-main-layout">
       <aside class="cx-sidebar" aria-label="主导航"><div class="cx-avatar-card"><div class="cx-avatar-circle">SB</div><p class="cx-avatar-name">提交中心</p></div><nav class="cx-side-menu"><a href="/">首页</a><a class="active" href="/submit">提交</a><a href="/records">记录</a><a href="/admin">管理</a></nav></aside>
       <main class="cx-content-area">
@@ -46,6 +46,15 @@
     const wrongList = document.getElementById('wrong-list');
     document.getElementById('send-btn').addEventListener('click', send);
     document.getElementById('load-btn').addEventListener('click', loadSample);
+    loadProfile().catch(() => {});
+
+    async function loadProfile() {
+      const res = await fetch('/auth/status', { credentials: 'same-origin' });
+      if (!res.ok) return;
+      const data = await res.json();
+      document.getElementById('user-label').textContent = data.user || '-';
+      document.getElementById('role-label').textContent = data.role === 'client' ? '\u5b66\u751f' : (data.role || '-');
+    }
 
     async function send() {
       statusEl.textContent = '发送中...';
