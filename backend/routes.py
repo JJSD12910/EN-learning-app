@@ -776,7 +776,7 @@ def client_login():
     data = request.get_json(silent=True) or {}
     username = data.get("username")
     password = data.get("password")
-    ok, user, role = validate_credentials(g.db, username, password, ClientUser)
+    ok, user, _role = validate_credentials(g.db, username, password, ClientUser)
     client_ip = request.remote_addr or "unknown"
     if not ok:
         print(f"[client-login] fail user={username!r} ip={client_ip}")
@@ -787,8 +787,7 @@ def client_login():
         g.db.commit()
     token = issue_session(g.db, user, "client")
     print(f"[client-login] success user={username!r} ip={client_ip}")
-    resp = jsonify({"status": "ok", "ok": True, "user": user, "token": token, "role": role})
-    return apply_session_cookie(resp, token, secure=request.is_secure)
+    return jsonify({"ok": True, "user": user, "token": token})
 
 
 @bp.route("/logout")
@@ -820,8 +819,6 @@ def home():
         return send_from_directory(FRONTEND_DIR, "assistant.html")
     if role == "teacher":
         return send_from_directory(FRONTEND_DIR, "teacher.html")
-    if role == "client":
-        return redirect("/submit")
     return redirect("/login")
 
 
@@ -842,14 +839,12 @@ def teacher_page():
 
 @bp.route("/submit", methods=["GET"])
 @login_required(api=False)
-@role_required(["client"], api=False)
 def submit_page():
     return send_from_directory(FRONTEND_DIR, "submit.html")
 
 
 @bp.route("/records", methods=["GET"])
 @login_required(api=False)
-@role_required(["client"], api=False)
 def records_page():
     return send_from_directory(FRONTEND_DIR, "records.html")
 
