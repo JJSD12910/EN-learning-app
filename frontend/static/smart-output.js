@@ -14,7 +14,7 @@
     class_name: "Class",
     student_id: "Student ID",
     student_no: "Student No",
-    client_username: "Device User",
+    client_username: "Student Account",
     teacher_username: "Teacher",
     score: "Score",
     total: "Total",
@@ -337,6 +337,7 @@
   }
 
   function renderEmpty(target, emptyText) {
+    if (!target) return;
     target.innerHTML = "";
     target.classList.add("cx-smart-output", "is-empty");
     const text = emptyText || target.dataset.empty || "No data";

@@ -1,7 +1,9 @@
+import re
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from functools import wraps
-from typing import Optional, Tuple
+from typing import Optional
 
 from flask import g, jsonify, redirect, request
 from sqlalchemy.orm import Session
@@ -17,6 +19,40 @@ def _api_error_payload(status: int):
     if status == 403:
         return {"code": 40301, "message": "forbidden", "data": {}}
     return {"code": 50001, "message": "internal_error", "data": {}}
+
+
+def parse_validity_datetime(value, *, end_of_day: bool = False):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", text):
+        if end_of_day:
+            text = f"{text}T23:59:59+00:00"
+        else:
+            text = f"{text}T00:00:00+00:00"
+    elif text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def teacher_account_is_currently_valid(user_row, now=None):
+    role = getattr(user_row, "role", None) or "admin"
+    if role != "teacher":
+        return True
+    now_dt = now or datetime.now(timezone.utc)
+    valid_from = parse_validity_datetime(getattr(user_row, "valid_from", None), end_of_day=False)
+    valid_to = parse_validity_datetime(getattr(user_row, "valid_to", None), end_of_day=True)
+    if valid_from and now_dt < valid_from:
+        return False
+    if valid_to and now_dt > valid_to:
+        return False
+    return True
 
 
 def issue_session(db: Session, username: str) -> str:
@@ -42,12 +78,11 @@ def resolve_user(db: Session, req) -> Optional[dict]:
         db.delete(session)
         db.commit()
         return None
-    # refresh timestamp
     session.ts = time.time()
     db.commit()
     user_row = db.query(User).filter(User.username == session.user).first()
     if user_row:
-        if int(getattr(user_row, "is_active", 1) or 0) != 1:
+        if int(getattr(user_row, "is_active", 1) or 0) != 1 or not teacher_account_is_currently_valid(user_row):
             db.delete(session)
             db.commit()
             return None
@@ -90,11 +125,9 @@ def role_required(allowed_roles, api: bool = True):
             if role in allowed_roles:
                 return fn(*args, **kwargs)
             if getattr(g, "current_user", None) is None:
-                # Not logged in; delegate to login flow
                 if api:
                     return jsonify(_api_error_payload(401)), 401
                 return redirect("/login")
-            # Logged in but insufficient permission
             if api:
                 return jsonify(_api_error_payload(403)), 403
             return redirect("/")

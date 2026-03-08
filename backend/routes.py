@@ -16,10 +16,11 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from .api_response import api_error, api_ok, parse_pagination
-from .auth import issue_session, login_required, role_required
+from .auth import issue_session, login_required, parse_validity_datetime, role_required, teacher_account_is_currently_valid
 from .db import DATA_DIR, FRONTEND_DIR, STATIC_DIR
 from .models import (
     Answer,
+    AppSetting,
     Attempt,
     AuditLog,
     ClientUser,
@@ -40,6 +41,8 @@ ACTIVE_QUIZZES: Dict[str, Dict[str, object]] = {}
 EXPORT_DIR = DATA_DIR / "exports"
 QUIZ_SESSION_TTL_SECONDS = 300
 WRONG_CLEAR_STREAK = 3
+WRONG_TRAINING_CONFIG_KEY = "wrong_training_v2"
+DEFAULT_WRONG_TRAINING_CONFIG = {"daily_total_count": 10, "reinforcement_count": 3, "mastery_streak": WRONG_CLEAR_STREAK}
 VALID_CLASS_STATUS = {"active", "dismissed"}
 VALID_STUDENT_STATUS = {"active", "inactive"}
 VALID_GENDERS = {"M", "F", "U"}
@@ -101,8 +104,8 @@ def class_to_dict(row: SchoolClass) -> Dict:
     }
 
 
-def student_to_dict(row: StudentProfile) -> Dict:
-    return {
+def student_to_dict(row: StudentProfile, wrong_pool_active_count: Optional[int] = None) -> Dict:
+    payload = {
         "id": row.id,
         "client_username": row.client_username,
         "school_id": row.school_id,
@@ -116,6 +119,9 @@ def student_to_dict(row: StudentProfile) -> Dict:
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
+    if wrong_pool_active_count is not None:
+        payload["wrong_pool_active_count"] = int(wrong_pool_active_count or 0)
+    return payload
 
 
 def exam_to_dict(row: Exam) -> Dict:
@@ -146,6 +152,7 @@ def attempt_to_dict(row: Attempt) -> Dict:
         "submitted_at": row.submitted_at,
         "score": row.score,
         "total": row.total,
+        "progress_count": int(getattr(row, "progress_count", 0) or 0),
         "duration_sec": row.duration_sec,
     }
 
@@ -171,6 +178,8 @@ def validate_credentials(db: Session, username: str, password: str, model):
     if user is not None and hasattr(user, "is_active"):
         if int(getattr(user, "is_active", 1) or 0) != 1:
             return False, None, None
+    if user and model is User and not teacher_account_is_currently_valid(user):
+        return False, None, None
     if user:
         role = getattr(user, "role", None) or ("admin" if model is User else "client")
         return True, username, role
@@ -179,6 +188,16 @@ def validate_credentials(db: Session, username: str, password: str, model):
 
 def utc_now_iso() -> str:
     return datetime.utcnow().isoformat() + "Z"
+
+
+def normalize_validity_value(value, *, end_of_day: bool = False) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    dt = parse_validity_datetime(text, end_of_day=end_of_day)
+    if not dt:
+        return None
+    return text
 
 
 def parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
@@ -252,7 +271,10 @@ def user_to_admin_dict(row: User) -> Dict:
         "is_active": int(row.is_active or 0),
         "created_at": row.created_at,
         "updated_at": row.updated_at,
+        "valid_from": getattr(row, "valid_from", None),
+        "valid_to": getattr(row, "valid_to", None),
         "last_login_at": row.last_login_at,
+        "is_within_validity": teacher_account_is_currently_valid(row),
     }
 
 
@@ -504,6 +526,87 @@ def parse_int(value, default: Optional[int] = None) -> Optional[int]:
         return default
 
 
+def _normalize_wrong_training_config_payload(raw: Optional[Dict]) -> Dict:
+    raw = raw if isinstance(raw, dict) else {}
+    total = parse_int(raw.get("daily_total_count"), DEFAULT_WRONG_TRAINING_CONFIG["daily_total_count"])
+    reinforcement = parse_int(raw.get("reinforcement_count"), DEFAULT_WRONG_TRAINING_CONFIG["reinforcement_count"])
+    mastery = parse_int(raw.get("mastery_streak"), DEFAULT_WRONG_TRAINING_CONFIG["mastery_streak"])
+    total = max(1, min(int(total or DEFAULT_WRONG_TRAINING_CONFIG["daily_total_count"]), 100))
+    reinforcement = max(0, min(int(reinforcement or 0), total))
+    mastery = max(1, min(int(mastery or DEFAULT_WRONG_TRAINING_CONFIG["mastery_streak"]), 10))
+    return {
+        "daily_total_count": total,
+        "reinforcement_count": reinforcement,
+        "regular_count": max(0, total - reinforcement),
+        "mastery_streak": mastery,
+    }
+
+
+def load_wrong_training_config(db: Session) -> Dict:
+    setting = db.query(AppSetting).filter(AppSetting.key == WRONG_TRAINING_CONFIG_KEY).first()
+    raw = {}
+    if setting and setting.value:
+        try:
+            raw = json.loads(setting.value or "{}")
+        except (TypeError, ValueError):
+            raw = {}
+    return _normalize_wrong_training_config_payload(raw)
+
+
+def save_wrong_training_config(db: Session, data: Optional[Dict]) -> Dict:
+    config = _normalize_wrong_training_config_payload(data)
+    stored = {
+        "daily_total_count": config["daily_total_count"],
+        "reinforcement_count": config["reinforcement_count"],
+        "mastery_streak": config["mastery_streak"],
+    }
+    now_str = utc_now_iso()
+    setting = db.query(AppSetting).filter(AppSetting.key == WRONG_TRAINING_CONFIG_KEY).first()
+    if setting:
+        setting.value = json.dumps(stored, ensure_ascii=False)
+        setting.updated_at = now_str
+    else:
+        db.add(AppSetting(key=WRONG_TRAINING_CONFIG_KEY, value=json.dumps(stored, ensure_ascii=False), updated_at=now_str))
+    config["updated_at"] = now_str
+    return config
+
+
+def wrong_training_priority_label() -> str:
+    return "最近做错 > 错误次数 > 历史耗时 > 普通题补足"
+
+
+def _wrong_last_seen_sort_key(value: Optional[str]):
+    return (1, value or "") if value else (0, "")
+
+
+def sort_wrong_training_candidates(rows):
+    rows = list(rows or [])
+    rows.sort(key=lambda item: _wrong_last_seen_sort_key(getattr(item[0], "last_seen_at", None)))
+    rows.sort(key=lambda item: int(getattr(item[0], "avg_cost_ms", 0) or 0), reverse=True)
+    rows.sort(key=lambda item: int(getattr(item[0], "wrong_count", 0) or 0), reverse=True)
+    rows.sort(key=lambda item: getattr(item[0], "last_wrong_at", None) or "", reverse=True)
+    return rows
+
+
+def _pick_random_question_ids(candidates: Sequence[str], count: int) -> List[str]:
+    pool = list(dict.fromkeys([qid for qid in candidates if qid]))
+    if count <= 0 or not pool:
+        return []
+    if len(pool) <= count:
+        return pool
+    return random.sample(pool, count)
+
+
+def estimate_avg_cost_ms(duration_sec: Optional[int], total_questions: int) -> Optional[int]:
+    if duration_sec is None or total_questions <= 0:
+        return None
+    try:
+        seconds = max(0, int(duration_sec))
+    except (TypeError, ValueError):
+        return None
+    return int((seconds * 1000) / max(1, total_questions))
+
+
 def parse_client_answer_mapping(raw_answers) -> Dict[str, Optional[int]]:
     mapping: Dict[str, Optional[int]] = {}
     if isinstance(raw_answers, dict):
@@ -537,7 +640,7 @@ def load_exam(exam_id: str) -> Optional[Exam]:
 def can_access_class(class_row: SchoolClass) -> bool:
     role = getattr(g, "current_role", None)
     user = getattr(g, "current_user", None)
-    if role == "admin":
+    if role == "assistant":
         return True
     return role == "teacher" and class_row.teacher_username == user
 
@@ -592,7 +695,7 @@ def ensure_student_access(student_id: int):
 
 
 def owned_class_ids() -> List[int]:
-    if getattr(g, "current_role", None) == "admin":
+    if getattr(g, "current_role", None) == "assistant":
         rows = g.db.query(SchoolClass.id).all()
     else:
         rows = g.db.query(SchoolClass.id).filter(SchoolClass.teacher_username == getattr(g, "current_user", None)).all()
@@ -699,15 +802,24 @@ def home():
     role = getattr(g, "current_role", None)
     if role == "admin":
         return send_from_directory(FRONTEND_DIR, "admin.html")
+    if role == "assistant":
+        return send_from_directory(FRONTEND_DIR, "assistant.html")
     if role == "teacher":
         return send_from_directory(FRONTEND_DIR, "teacher.html")
     return redirect("/login")
 
 
+@bp.route("/assistant", methods=["GET"])
+@login_required(api=False)
+@role_required(["assistant"], api=False)
+def assistant_page():
+    return send_from_directory(FRONTEND_DIR, "assistant.html")
+
+
 @bp.route("/teacher", methods=["GET"])
 @login_required(api=False)
 def teacher_page():
-    if getattr(g, "current_role", None) not in ("teacher", "admin"):
+    if getattr(g, "current_role", None) not in ("teacher", "assistant"):
         return redirect("/")
     return send_from_directory(FRONTEND_DIR, "teacher.html")
 
@@ -896,7 +1008,7 @@ def store_score_record(db: Session, user_id: str, quiz_id: str, score: int, tota
 
 @bp.route("/api/questions/bank")
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def bank_info():
     limit, offset = parse_pagination(default_limit=20, max_limit=100)
     category = (request.args.get("category") or "").strip()
@@ -923,7 +1035,7 @@ def bank_info():
 
 @bp.route("/api/questions", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def list_questions():
     limit, offset = parse_pagination(default_limit=20, max_limit=100)
     category = (request.args.get("category") or "").strip()
@@ -942,7 +1054,7 @@ def list_questions():
 
 @bp.route("/api/questions/import", methods=["POST"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def import_questions():
     data = request.get_json(silent=True)
     if isinstance(data, dict):
@@ -996,7 +1108,7 @@ def import_questions():
 
 @bp.route("/api/questions", methods=["POST"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def add_question():
     data = request.get_json(silent=True) or {}
     try:
@@ -1030,7 +1142,7 @@ def add_question():
 
 @bp.route("/api/questions/<qid>", methods=["PUT"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def update_question(qid):
     data = request.get_json(silent=True) or {}
     question = g.db.query(Question).filter(Question.id == qid).first()
@@ -1061,7 +1173,7 @@ def update_question(qid):
 
 @bp.route("/api/questions/<qid>", methods=["DELETE"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def delete_question(qid):
     data = request.get_json(silent=True) or {}
     confirm_resp = require_confirm_phrase(data, "DELETE_QUESTION")
@@ -1078,7 +1190,7 @@ def delete_question(qid):
 
 @bp.route("/api/records/clear", methods=["POST"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def clear_records():
     data = request.get_json(silent=True) or {}
     confirm_resp = require_confirm_phrase(data, "CLEAR_RECORDS")
@@ -1100,7 +1212,7 @@ def _find_client_user(username: str) -> Optional[ClientUser]:
 
 @bp.route("/api/admin/teachers", methods=["GET"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["admin", "assistant"])
 def admin_list_teachers():
     limit, offset = parse_admin_limit_offset()
     keyword = (request.args.get("q") or "").strip()
@@ -1125,6 +1237,14 @@ def admin_create_teacher():
     username = str(data.get("username") or "").strip()
     password = str(data.get("password") or "").strip()
     display_name = str(data.get("display_name") or "").strip() or None
+    valid_from = normalize_validity_value(data.get("valid_from"), end_of_day=False)
+    valid_to = normalize_validity_value(data.get("valid_to"), end_of_day=True)
+    if data.get("valid_from") not in (None, "") and valid_from is None:
+        return api_error("valid_from must be ISO8601 or YYYY-MM-DD", status=400)
+    if data.get("valid_to") not in (None, "") and valid_to is None:
+        return api_error("valid_to must be ISO8601 or YYYY-MM-DD", status=400)
+    if valid_from and valid_to and parse_validity_datetime(valid_to, end_of_day=True) < parse_validity_datetime(valid_from):
+        return api_error("valid_to must be >= valid_from", status=400)
     if not username:
         return api_error("username is required", status=400)
     if not password or len(password) < 6:
@@ -1142,6 +1262,8 @@ def admin_create_teacher():
             is_active=1,
             created_at=now_str,
             updated_at=now_str,
+            valid_from=valid_from,
+            valid_to=valid_to,
             last_login_at=None,
         )
         g.db.add(row)
@@ -1150,7 +1272,7 @@ def admin_create_teacher():
             "CREATE_TEACHER",
             target_type="users",
             target_id=username,
-            detail={"display_name": display_name, "is_active": 1},
+            detail={"display_name": display_name, "is_active": 1, "valid_from": valid_from, "valid_to": valid_to},
         )
         result = user_to_admin_dict(row)
     return api_ok({"teacher": result}, status=201)
@@ -1230,16 +1352,28 @@ def admin_update_teacher_profile(username):
     display_name = str(display_name).strip() if display_name is not None else None
     if display_name == "":
         display_name = None
+    valid_from = normalize_validity_value(data.get("valid_from"), end_of_day=False) if "valid_from" in data else getattr(row, "valid_from", None)
+    valid_to = normalize_validity_value(data.get("valid_to"), end_of_day=True) if "valid_to" in data else getattr(row, "valid_to", None)
+    if "valid_from" in data and data.get("valid_from") not in (None, "") and valid_from is None:
+        return api_error("valid_from must be ISO8601 or YYYY-MM-DD", status=400)
+    if "valid_to" in data and data.get("valid_to") not in (None, "") and valid_to is None:
+        return api_error("valid_to must be ISO8601 or YYYY-MM-DD", status=400)
+    if valid_from and valid_to and parse_validity_datetime(valid_to, end_of_day=True) < parse_validity_datetime(valid_from):
+        return api_error("valid_to must be >= valid_from", status=400)
     with transactional(g.db):
         row.display_name = display_name
+        if "valid_from" in data:
+            row.valid_from = valid_from
+        if "valid_to" in data:
+            row.valid_to = valid_to
         row.updated_at = utc_now_iso()
-        add_audit_log("UPDATE_TEACHER_PROFILE", target_type="users", target_id=row.username, detail={"display_name": display_name})
+        add_audit_log("UPDATE_TEACHER_PROFILE", target_type="users", target_id=row.username, detail={"display_name": display_name, "valid_from": row.valid_from, "valid_to": row.valid_to})
     return api_ok({"teacher": user_to_admin_dict(row)})
 
 
 @bp.route("/api/admin/client_users", methods=["GET"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_list_client_users():
     limit, offset = parse_admin_limit_offset()
     keyword = (request.args.get("q") or "").strip()
@@ -1258,7 +1392,7 @@ def admin_list_client_users():
 
 @bp.route("/api/admin/client_users", methods=["POST"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_create_client_user():
     data = request.get_json(silent=True) or {}
     username = str(data.get("username") or "").strip()
@@ -1289,7 +1423,7 @@ def admin_create_client_user():
 
 @bp.route("/api/admin/client_users/<username>/enable", methods=["POST"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_enable_client_user(username):
     data = request.get_json(silent=True) or {}
     confirm_resp = require_confirm_phrase(data, "ENABLE_CLIENT_USER")
@@ -1308,7 +1442,7 @@ def admin_enable_client_user(username):
 
 @bp.route("/api/admin/client_users/<username>/disable", methods=["POST"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_disable_client_user(username):
     data = request.get_json(silent=True) or {}
     confirm_resp = require_confirm_phrase(data, "DISABLE_CLIENT_USER")
@@ -1327,7 +1461,7 @@ def admin_disable_client_user(username):
 
 @bp.route("/api/admin/client_users/<username>/password/reset", methods=["POST"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_reset_client_password(username):
     data = request.get_json(silent=True) or {}
     confirm_resp = require_confirm_phrase(data, "RESET_CLIENT_PASSWORD")
@@ -1369,7 +1503,7 @@ def admin_create_school():
 
 @bp.route("/api/admin/schools", methods=["GET"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["admin", "assistant"])
 def admin_list_schools():
     limit, offset = parse_admin_limit_offset()
     keyword = (request.args.get("q") or "").strip()
@@ -1384,7 +1518,7 @@ def admin_list_schools():
 
 @bp.route("/api/admin/classes", methods=["POST"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_create_class():
     data = request.get_json(silent=True) or {}
     school_id = parse_int(data.get("school_id"), None)
@@ -1432,7 +1566,7 @@ def admin_create_class():
 
 @bp.route("/api/admin/classes", methods=["GET"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_list_classes():
     limit, offset = parse_admin_limit_offset()
     query = g.db.query(SchoolClass)
@@ -1456,7 +1590,7 @@ def admin_list_classes():
 
 @bp.route("/api/admin/classes", methods=["PUT"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_update_class():
     data = request.get_json(silent=True) or {}
     class_id = parse_int(data.get("id"), None)
@@ -1519,7 +1653,7 @@ def admin_update_class():
 
 @bp.route("/api/admin/students", methods=["POST"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_create_student():
     data = request.get_json(silent=True) or {}
     client_username = (data.get("client_username") or "").strip()
@@ -1607,7 +1741,7 @@ def admin_create_student():
 
 @bp.route("/api/admin/students", methods=["GET"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_list_students():
     limit, offset = parse_admin_limit_offset()
     query = g.db.query(StudentProfile)
@@ -1641,12 +1775,27 @@ def admin_list_students():
     query = query.order_by(StudentProfile.id.desc())
     total = query.count()
     rows = query.offset(offset).limit(limit).all()
-    return api_ok({"items": [student_to_dict(s) for s in rows], "total": total, "limit": limit, "offset": offset})
+    wrong_counts = {}
+    student_ids = [row.id for row in rows]
+    if student_ids:
+        count_rows = (
+            g.db.query(WrongQuestion.student_profile_id, func.count(WrongQuestion.question_id))
+            .filter(WrongQuestion.student_profile_id.in_(student_ids), WrongQuestion.is_active == 1)
+            .group_by(WrongQuestion.student_profile_id)
+            .all()
+        )
+        wrong_counts = {int(student_id): int(count or 0) for student_id, count in count_rows}
+    return api_ok({
+        "items": [student_to_dict(s, wrong_pool_active_count=wrong_counts.get(int(s.id), 0)) for s in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    })
 
 
 @bp.route("/api/admin/students/<int:student_id>", methods=["PUT"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_update_student(student_id):
     row = g.db.query(StudentProfile).filter(StudentProfile.id == student_id).first()
     if not row:
@@ -1752,7 +1901,6 @@ def admin_update_student(student_id):
             },
         )
         if old_wrong_training_enabled == 1 and int(getattr(row, "wrong_training_enabled", 0) or 0) == 0:
-            g.db.query(WrongQuestion).filter(WrongQuestion.student_profile_id == row.id).update({"is_active": 0})
             add_audit_log(
                 "DISABLE_STUDENT_WRONG_TRAINING",
                 target_type="student_profiles",
@@ -1786,7 +1934,7 @@ def admin_update_student(student_id):
 
 @bp.route("/api/admin/students/<int:student_id>", methods=["DELETE"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_delete_student(student_id):
     row = g.db.query(StudentProfile).filter(StudentProfile.id == student_id).first()
     if not row:
@@ -1800,7 +1948,7 @@ def admin_delete_student(student_id):
 
 @bp.route("/api/admin/attempts", methods=["GET"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_list_attempts():
     limit, offset = parse_admin_limit_offset()
     school_id = parse_int(request.args.get("school_id"), None)
@@ -1900,7 +2048,7 @@ def admin_list_attempts():
 
 @bp.route("/api/admin/attempts/<attempt_id>", methods=["GET"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_attempt_detail(attempt_id):
     attempt = g.db.query(Attempt).filter(Attempt.id == attempt_id).first()
     if not attempt:
@@ -1961,7 +2109,7 @@ def admin_attempt_detail(attempt_id):
 
 @bp.route("/api/admin/audit_logs", methods=["GET"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_list_audit_logs():
     limit, offset = parse_admin_limit_offset()
     action = (request.args.get("action") or "").strip() or None
@@ -2014,7 +2162,7 @@ def admin_list_audit_logs():
 
 @bp.route("/api/admin/system/reset", methods=["POST"])
 @login_required(api=True)
-@role_required(["admin"])
+@role_required(["assistant"])
 def admin_system_reset():
     data = request.get_json(silent=True) or {}
     confirm_resp = require_confirm_phrase(data, RESET_ALL_TEST_DATA_CONFIRM)
@@ -2051,7 +2199,7 @@ def admin_system_reset():
 
 @bp.route("/api/teacher/classes", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_list_classes():
     limit, offset = parse_limit_offset()
     query = g.db.query(SchoolClass)
@@ -2099,7 +2247,7 @@ def teacher_list_classes():
 
 @bp.route("/api/teacher/classes/<int:class_id>/students", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_class_students(class_id):
     class_row, error_resp = ensure_class_access(class_id)
     if error_resp:
@@ -2128,7 +2276,7 @@ def teacher_class_students(class_id):
 
 @bp.route("/api/teacher/classes", methods=["POST"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_create_class():
     data = request.get_json(silent=True) or {}
     school_id = parse_int(data.get("school_id"), None)
@@ -2167,7 +2315,7 @@ def teacher_create_class():
 
 @bp.route("/api/teacher/classes/<int:class_id>/dismiss", methods=["POST"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_dismiss_class(class_id):
     class_row, error_resp = ensure_class_access(class_id)
     if error_resp:
@@ -2179,7 +2327,7 @@ def teacher_dismiss_class(class_id):
 
 @bp.route("/api/teacher/classes/<int:class_id>/students/batch_add", methods=["POST"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_batch_add_students(class_id):
     class_row, error_resp = ensure_class_access(class_id)
     if error_resp:
@@ -2208,7 +2356,7 @@ def teacher_batch_add_students(class_id):
 
 @bp.route("/api/teacher/classes/<int:class_id>/students/batch_remove", methods=["POST"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_batch_remove_students(class_id):
     class_row, error_resp = ensure_class_access(class_id)
     if error_resp:
@@ -2229,7 +2377,7 @@ def teacher_batch_remove_students(class_id):
 
 @bp.route("/api/teacher/exams", methods=["POST"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_create_exam():
     data = request.get_json(silent=True) or {}
     class_id = parse_int(data.get("class_id"), None)
@@ -2343,7 +2491,7 @@ def teacher_create_exam():
 
 @bp.route("/api/teacher/exams", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_list_exams():
     limit, offset = parse_limit_offset()
     query = g.db.query(Exam)
@@ -2445,7 +2593,7 @@ def teacher_list_exams():
 
 @bp.route("/api/teacher/exams/<exam_id>", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_get_exam(exam_id):
     exam, class_row, error_resp = ensure_exam_access(exam_id)
     if error_resp:
@@ -2464,7 +2612,7 @@ def teacher_get_exam(exam_id):
 
 @bp.route("/api/teacher/exams/<exam_id>", methods=["PATCH"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_update_exam(exam_id):
     exam, class_row, error_resp = ensure_exam_access_lifecycle(exam_id)
     if error_resp:
@@ -2588,7 +2736,7 @@ def teacher_update_exam(exam_id):
 
 @bp.route("/api/teacher/exams/<exam_id>/publish", methods=["POST"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_publish_exam(exam_id):
     exam, class_row, error_resp = ensure_exam_access_lifecycle(exam_id)
     if error_resp:
@@ -2612,7 +2760,7 @@ def teacher_publish_exam(exam_id):
 
 @bp.route("/api/teacher/exams/<exam_id>/unpublish", methods=["POST"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_unpublish_exam(exam_id):
     exam, class_row, error_resp = ensure_exam_access_lifecycle(exam_id)
     if error_resp:
@@ -2636,7 +2784,7 @@ def teacher_unpublish_exam(exam_id):
 
 @bp.route("/api/teacher/exams/<exam_id>/end", methods=["POST"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_end_exam(exam_id):
     exam, class_row, error_resp = ensure_exam_access_lifecycle(exam_id)
     if error_resp:
@@ -2658,7 +2806,7 @@ def teacher_end_exam(exam_id):
 
 @bp.route("/api/teacher/exams/<exam_id>/archive", methods=["POST"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_archive_exam(exam_id):
     exam, class_row, error_resp = ensure_exam_access_lifecycle(exam_id)
     if error_resp:
@@ -2678,7 +2826,7 @@ def teacher_archive_exam(exam_id):
 
 @bp.route("/api/teacher/exams/<exam_id>", methods=["DELETE"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_delete_exam(exam_id):
     exam, class_row, error_resp = ensure_exam_access_lifecycle(exam_id)
     if error_resp:
@@ -2701,7 +2849,7 @@ def teacher_delete_exam(exam_id):
 
 @bp.route("/api/teacher/exams/<exam_id>/questions", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_exam_questions(exam_id):
     exam, _class_row, error_resp = ensure_exam_access(exam_id)
     if error_resp:
@@ -2731,9 +2879,92 @@ def teacher_exam_questions(exam_id):
     return v1_ok({"exam_id": exam.id, "items": items})
 
 
+@bp.route("/api/teacher/exams/<exam_id>/question_stats", methods=["GET"])
+@login_required(api=True)
+@role_required(["teacher", "assistant"])
+def teacher_exam_question_stats(exam_id):
+    exam, _class_row, error_resp = ensure_exam_access(exam_id)
+    if error_resp:
+        return error_resp
+
+    links = g.db.query(ExamQuestion).filter(ExamQuestion.exam_id == exam.id).all()
+    qids = [row.question_id for row in links]
+    questions = g.db.query(Question).filter(Question.id.in_(qids)).all() if qids else []
+    qmap = {q.id: q for q in questions}
+
+    submitted_attempts = (
+        g.db.query(Attempt)
+        .filter(Attempt.exam_id == exam.id, Attempt.submitted_at.isnot(None))
+        .order_by(Attempt.submitted_at.desc())
+        .all()
+    )
+    latest_attempts = {}
+    for attempt in submitted_attempts:
+        if attempt.student_profile_id not in latest_attempts:
+            latest_attempts[attempt.student_profile_id] = attempt
+    attempt_ids = [row.id for row in latest_attempts.values()]
+
+    answer_rows = g.db.query(Answer).filter(Answer.attempt_id.in_(attempt_ids)).all() if attempt_ids else []
+    stats_map = {}
+    for row in answer_rows:
+        item = stats_map.setdefault(
+            row.question_id,
+            {"answer_count": 0, "correct_count": 0, "option_counts": {}},
+        )
+        option_index = int(row.your or 0)
+        item["answer_count"] += 1
+        item["option_counts"][option_index] = int(item["option_counts"].get(option_index, 0)) + 1
+        if int(row.is_correct or 0) == 1:
+            item["correct_count"] += 1
+
+    items = []
+    submitted_total = len(latest_attempts)
+    for index, qid in enumerate(qids, start=1):
+        question = qmap.get(qid)
+        if not question:
+            continue
+        options = json.loads(question.options or "[]")
+        stat = stats_map.get(qid, {})
+        answer_count = int(stat.get("answer_count", 0))
+        correct_count = int(stat.get("correct_count", 0))
+        option_counts = stat.get("option_counts", {})
+        option_total = max(4, len(options))
+        option_stats = []
+        for option_index in range(option_total):
+            option_label = chr(65 + option_index) if option_index < 26 else str(option_index + 1)
+            option_stats.append(
+                {
+                    "index": option_index,
+                    "label": option_label,
+                    "text": options[option_index] if option_index < len(options) else "",
+                    "count": int(option_counts.get(option_index, 0)),
+                    "is_correct": option_index == int(question.answer or 0),
+                }
+            )
+        items.append(
+            {
+                "question_id": question.id,
+                "sequence": index,
+                "stem": question.stem,
+                "category": question.category,
+                "answer": int(question.answer or 0),
+                "answer_label": chr(65 + int(question.answer or 0)) if int(question.answer or 0) < 26 else str(int(question.answer or 0) + 1),
+                "answer_text": options[int(question.answer or 0)] if int(question.answer or 0) < len(options) else "",
+                "submitted_count": submitted_total,
+                "answered_count": answer_count,
+                "correct_count": correct_count,
+                "wrong_count": max(answer_count - correct_count, 0),
+                "accuracy": normalized_accuracy(correct_count, answer_count),
+                "options": option_stats,
+            }
+        )
+
+    return v1_ok({"exam_id": exam.id, "submitted_total": submitted_total, "items": items})
+
+
 @bp.route("/api/teacher/exams/<exam_id>/attempts", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_exam_attempts(exam_id):
     exam, _class_row, error_resp = ensure_exam_access(exam_id)
     if error_resp:
@@ -2854,6 +3085,9 @@ def client_start_exam(exam_id):
         .order_by(Attempt.started_at.desc())
         .first()
     )
+    if attempt and getattr(attempt, "progress_count", None) is None:
+        with transactional(g.db):
+            attempt.progress_count = 0
     if not attempt:
         attempt = Attempt(
             id=uuid.uuid4().hex,
@@ -2863,6 +3097,7 @@ def client_start_exam(exam_id):
             submitted_at=None,
             score=0,
             total=0,
+            progress_count=0,
             duration_sec=None,
         )
         with transactional(g.db):
@@ -2885,6 +3120,37 @@ def client_start_exam(exam_id):
                 }
             )
     return v1_ok({"attempt_id": attempt.id, "exam_id": exam.id, "items": payload_questions})
+
+
+@bp.route("/api/client/attempts/<attempt_id>/progress", methods=["POST"])
+@login_required(api=True)
+@role_required(["client"])
+def client_update_attempt_progress(attempt_id):
+    profile, error_resp = ensure_client_profile(require_class=True)
+    if error_resp:
+        return v1_error("forbidden", status=403, reason="student profile not assigned to class")
+    attempt = g.db.query(Attempt).filter(Attempt.id == attempt_id).first()
+    if not attempt:
+        return v1_error("not_found", status=404, reason="attempt not found")
+    if attempt.student_profile_id != profile.id:
+        return v1_error("forbidden", status=403, reason="attempt does not belong to current student")
+    if attempt.submitted_at:
+        return v1_error("conflict", status=409, reason="attempt already submitted")
+    exam = load_exam(attempt.exam_id)
+    if not exam:
+        return v1_error("not_found", status=404, reason="exam not found")
+    opened, msg = exam_is_open_for_action(exam)
+    if not opened:
+        return v1_error("forbidden", status=403, reason=msg)
+    data = request.get_json(silent=True) or {}
+    progress_count = parse_int(data.get("progress_count"), None)
+    if progress_count is None:
+        return v1_error("invalid_params", status=400, reason="progress_count is required")
+    question_count = max(0, int(exam.question_count or 0))
+    progress_count = max(0, min(progress_count, question_count))
+    with transactional(g.db):
+        attempt.progress_count = progress_count
+    return v1_ok({"attempt_id": attempt.id, "progress_count": progress_count, "question_count": question_count})
 
 
 @bp.route("/api/client/attempts/<attempt_id>/submit", methods=["POST"])
@@ -2920,7 +3186,8 @@ def client_submit_attempt(attempt_id):
     score = 0
     total = 0
     submitted_at = utc_now_iso()
-    wrong_training_enabled = int(getattr(profile, "wrong_training_enabled", 0) or 0) == 1
+    wrong_training_config = load_wrong_training_config(g.db)
+    mastery_streak = int(wrong_training_config.get("mastery_streak") or WRONG_CLEAR_STREAK)
 
     with transactional(g.db):
         for qid in question_ids:
@@ -2932,6 +3199,7 @@ def client_submit_attempt(attempt_id):
             your_value = -1 if your is None else int(your)
             correct = int(q.answer)
             is_correct = 1 if your_value == correct else 0
+            avg_cost_ms = estimate_avg_cost_ms(duration_sec, len(question_ids))
             wrong_row = (
                 g.db.query(WrongQuestion)
                 .filter(WrongQuestion.student_profile_id == profile.id, WrongQuestion.question_id == qid)
@@ -2939,34 +3207,42 @@ def client_submit_attempt(attempt_id):
             )
             if is_correct:
                 score += 1
-                if wrong_training_enabled and wrong_row and int(wrong_row.is_active or 0) == 1:
+                if wrong_row:
                     next_streak = int(wrong_row.correct_streak or 0) + 1
                     wrong_row.correct_streak = next_streak
                     wrong_row.last_correct_at = submitted_at
-                    if next_streak >= WRONG_CLEAR_STREAK:
+                    if avg_cost_ms is not None:
+                        history_avg = parse_int(getattr(wrong_row, "avg_cost_ms", None), None)
+                        wrong_row.avg_cost_ms = avg_cost_ms if history_avg is None else int((history_avg + avg_cost_ms) / 2)
+                    if next_streak >= mastery_streak:
                         wrong_row.is_active = 0
             else:
-                if wrong_training_enabled:
-                    if wrong_row:
-                        wrong_row.wrong_count = int(wrong_row.wrong_count or 0) + 1
-                        wrong_row.correct_streak = 0
-                        wrong_row.is_active = 1
-                        wrong_row.last_wrong_at = submitted_at
-                    else:
-                        g.db.add(
-                            WrongQuestion(
-                                student_profile_id=profile.id,
-                                question_id=qid,
-                                wrong_count=1,
-                                correct_streak=0,
-                                is_active=1,
-                                last_wrong_at=submitted_at,
-                                last_correct_at=None,
-                            )
+                if wrong_row:
+                    wrong_row.wrong_count = int(wrong_row.wrong_count or 0) + 1
+                    wrong_row.correct_streak = 0
+                    wrong_row.is_active = 1
+                    wrong_row.last_wrong_at = submitted_at
+                    if avg_cost_ms is not None:
+                        history_avg = parse_int(getattr(wrong_row, "avg_cost_ms", None), None)
+                        wrong_row.avg_cost_ms = avg_cost_ms if history_avg is None else int((history_avg + avg_cost_ms) / 2)
+                else:
+                    g.db.add(
+                        WrongQuestion(
+                            student_profile_id=profile.id,
+                            question_id=qid,
+                            wrong_count=1,
+                            correct_streak=0,
+                            is_active=1,
+                            last_wrong_at=submitted_at,
+                            last_correct_at=None,
+                            last_seen_at=None,
+                            avg_cost_ms=avg_cost_ms,
                         )
+                    )
             g.db.add(Answer(id=uuid.uuid4().hex, attempt_id=attempt.id, question_id=qid, your=your_value, correct=correct, is_correct=is_correct))
         attempt.score = score
         attempt.total = total
+        attempt.progress_count = total
         attempt.submitted_at = submitted_at
         attempt.duration_sec = duration_sec
     return v1_ok(
@@ -2982,7 +3258,7 @@ def client_submit_attempt(attempt_id):
 
 @bp.route("/api/teacher/classes/<int:class_id>/scores", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_class_scores(class_id):
     class_row, error_resp = ensure_class_access(class_id)
     if error_resp:
@@ -3061,7 +3337,7 @@ def teacher_class_scores(class_id):
 
 @bp.route("/api/teacher/students/<int:student_id>/overview", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_student_overview(student_id):
     student, class_row, error_resp = ensure_student_access(student_id)
     if error_resp:
@@ -3108,7 +3384,7 @@ def teacher_student_overview(student_id):
 
 @bp.route("/api/teacher/students/<int:student_id>/attempts", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_student_attempts(student_id):
     student, _class_row, error_resp = ensure_student_access(student_id)
     if error_resp:
@@ -3153,7 +3429,7 @@ def teacher_student_attempts(student_id):
 
 @bp.route("/api/teacher/attempts/<attempt_id>", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_attempt_detail(attempt_id):
     attempt = g.db.query(Attempt).filter(Attempt.id == attempt_id).first()
     if not attempt:
@@ -3214,9 +3490,38 @@ def teacher_attempt_detail(attempt_id):
     )
 
 
+@bp.route("/api/teacher/wrong_training/config", methods=["GET"])
+@login_required(api=True)
+@role_required(["assistant"])
+def teacher_wrong_training_config_get():
+    config = load_wrong_training_config(g.db)
+    return v1_ok({"config": config, "priority_rule": wrong_training_priority_label()})
+
+
+@bp.route("/api/teacher/wrong_training/config", methods=["PUT"])
+@login_required(api=True)
+@role_required(["assistant"])
+def teacher_wrong_training_config_update():
+    data = request.get_json(silent=True) or {}
+    with transactional(g.db):
+        config = save_wrong_training_config(g.db, data)
+        add_audit_log(
+            "UPDATE_WRONG_TRAINING_CONFIG",
+            target_type="app_settings",
+            target_id=WRONG_TRAINING_CONFIG_KEY,
+            detail={
+                "daily_total_count": config["daily_total_count"],
+                "reinforcement_count": config["reinforcement_count"],
+                "regular_count": config["regular_count"],
+                "mastery_streak": config["mastery_streak"],
+            },
+        )
+    return v1_ok({"config": config, "priority_rule": wrong_training_priority_label()})
+
+
 @bp.route("/api/teacher/students/<int:student_id>/wrongs", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_student_wrongs(student_id):
     student, _class_row, error_resp = ensure_student_access(student_id)
     if error_resp:
@@ -3244,6 +3549,8 @@ def teacher_student_wrongs(student_id):
                 "is_active": bool(wrong.is_active),
                 "last_wrong_at": wrong.last_wrong_at,
                 "last_correct_at": wrong.last_correct_at,
+                "last_seen_at": getattr(wrong, "last_seen_at", None),
+                "avg_cost_ms": parse_int(getattr(wrong, "avg_cost_ms", None), None),
                 "correct": question.answer,
                 "analysis": question.analysis,
             }
@@ -3253,7 +3560,7 @@ def teacher_student_wrongs(student_id):
 
 @bp.route("/api/teacher/classes/<int:class_id>/wrongs_summary", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def teacher_class_wrongs_summary(class_id):
     class_row, error_resp = ensure_class_access(class_id)
     if error_resp:
@@ -3323,41 +3630,81 @@ def teacher_class_wrongs_summary(class_id):
 
 @bp.route("/api/teacher/students/<int:student_id>/wrongs/practice", methods=["POST"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_student_wrongs_practice(student_id):
     student, class_row, error_resp = ensure_student_access(student_id)
     if error_resp:
         return error_resp
     if not student.class_id or not class_row:
         return v1_error("forbidden", status=403, reason="student is not assigned to class")
-    if int(getattr(student, "wrong_training_enabled", 0) or 0) != 1:
-        return v1_error("conflict", status=409, reason="wrong training is disabled for student")
     data = request.get_json(silent=True) or {}
-    count = parse_int(data.get("count"), 10)
-    if count is None or count <= 0:
-        return v1_error("invalid_params", status=400, reason="count must be positive")
-    count = min(count, 100)
+    config = load_wrong_training_config(g.db)
+    total_count = parse_int(data.get("count"), config["daily_total_count"])
+    reinforcement_count = parse_int(data.get("reinforcement_count"), config["reinforcement_count"])
+    mastery_streak = parse_int(data.get("mastery_streak"), config["mastery_streak"])
+    runtime_config = _normalize_wrong_training_config_payload(
+        {
+            "daily_total_count": total_count,
+            "reinforcement_count": reinforcement_count,
+            "mastery_streak": mastery_streak,
+        }
+    )
+    total_count = runtime_config["daily_total_count"]
+    reinforcement_count = runtime_config["reinforcement_count"]
+    regular_count = runtime_config["regular_count"]
     title = (data.get("title") or "").strip()
     category = (data.get("category") or "").strip() or None
-    strategy = (data.get("strategy") or "most_wrong_first").strip() or "most_wrong_first"
+    strategy = (data.get("strategy") or "recent_wrong_first").strip() or "recent_wrong_first"
+    wrong_training_enabled = int(getattr(student, "wrong_training_enabled", 0) or 0) == 1
 
-    wrong_rows = (
+    wrong_rows_query = (
         g.db.query(WrongQuestion, Question)
         .join(Question, WrongQuestion.question_id == Question.id)
         .filter(WrongQuestion.student_profile_id == student.id, WrongQuestion.is_active == 1)
     )
     if category:
-        wrong_rows = wrong_rows.filter(Question.category == category)
-    if strategy == "most_wrong_first":
-        wrong_rows = wrong_rows.order_by(WrongQuestion.wrong_count.desc(), WrongQuestion.last_wrong_at.desc())
-    else:
-        wrong_rows = wrong_rows.order_by(WrongQuestion.last_wrong_at.desc())
-    wrong_rows = wrong_rows.all()
+        wrong_rows_query = wrong_rows_query.filter(Question.category == category)
+    wrong_rows = sort_wrong_training_candidates(wrong_rows_query.all())
+    active_wrong_ids = [question.id for _wrong, question in wrong_rows]
 
-    if not wrong_rows:
-        return v1_error("conflict", status=409, reason="no active wrong questions")
+    selected_wrong_pairs = wrong_rows[:reinforcement_count] if wrong_training_enabled else []
+    selected_wrong_ids = [question.id for _wrong, question in selected_wrong_pairs]
+    selected_ids = list(selected_wrong_ids)
+    selected_set = set(selected_ids)
 
-    selected_ids = [question.id for _wrong, question in wrong_rows[:count]]
+    all_question_query = g.db.query(Question.id)
+    if category:
+        all_question_query = all_question_query.filter(Question.category == category)
+    all_question_ids = [row[0] for row in all_question_query.all()]
+    preferred_regular_ids = [qid for qid in all_question_ids if qid not in selected_set and qid not in set(active_wrong_ids)]
+    fallback_regular_ids = [qid for qid in all_question_ids if qid not in selected_set and qid not in preferred_regular_ids]
+
+    fallback_needed = max(0, reinforcement_count - len(selected_wrong_ids))
+    regular_target = regular_count + fallback_needed
+    regular_selected = _pick_random_question_ids(preferred_regular_ids, regular_target)
+    if len(regular_selected) < regular_target:
+        more_regular = _pick_random_question_ids(
+            [qid for qid in fallback_regular_ids if qid not in set(regular_selected)],
+            regular_target - len(regular_selected),
+        )
+        regular_selected.extend(more_regular)
+    selected_ids.extend([qid for qid in regular_selected if qid not in selected_set])
+    selected_set = set(selected_ids)
+
+    if len(selected_ids) < total_count:
+        fill_ids = _pick_random_question_ids([qid for qid in all_question_ids if qid not in selected_set], total_count - len(selected_ids))
+        selected_ids.extend(fill_ids)
+        selected_set = set(selected_ids)
+
+    if len(selected_ids) < total_count:
+        return v1_error(
+            "conflict",
+            status=409,
+            reason="insufficient questions to satisfy total count",
+            data={"required_total_count": total_count, "selected_count": len(selected_ids)},
+        )
+
+    selected_ids = selected_ids[:total_count]
     practice_exam_id = "p_" + uuid.uuid4().hex[:8]
     now_str = utc_now_iso()
     if not title:
@@ -3381,15 +3728,42 @@ def teacher_student_wrongs_practice(student_id):
         g.db.add(exam_row)
         for qid in selected_ids:
             g.db.add(ExamQuestion(exam_id=practice_exam_id, question_id=qid))
+        for wrong_row, _question in selected_wrong_pairs:
+            wrong_row.last_seen_at = now_str
+        add_audit_log(
+            "CREATE_WRONG_TRAINING_PRACTICE",
+            target_type="exams",
+            target_id=practice_exam_id,
+            detail={
+                "student_id": student.id,
+                "wrong_training_enabled": wrong_training_enabled,
+                "daily_total_count": total_count,
+                "regular_count": regular_count,
+                "reinforcement_count": reinforcement_count,
+                "selected_wrong_count": len(selected_wrong_ids),
+                "selected_regular_count": len(selected_ids) - len(selected_wrong_ids),
+                "fallback_count": max(0, reinforcement_count - len(selected_wrong_ids)),
+                "mastery_streak": runtime_config["mastery_streak"],
+                "strategy": strategy,
+            },
+        )
 
     return v1_ok(
         {
             "practice_exam_id": practice_exam_id,
             "type": "practice",
             "student_id": student.id,
-            "requested_count": count,
+            "wrong_training_enabled": wrong_training_enabled,
+            "daily_total_count": total_count,
+            "regular_count": regular_count,
+            "reinforcement_count": reinforcement_count,
+            "selected_wrong_count": len(selected_wrong_ids),
+            "selected_regular_count": len(selected_ids) - len(selected_wrong_ids),
+            "fallback_count": max(0, reinforcement_count - len(selected_wrong_ids)),
             "selected_count": len(selected_ids),
             "strategy": strategy,
+            "priority_rule": wrong_training_priority_label(),
+            "mastery_streak": runtime_config["mastery_streak"],
             "created_at": now_str,
         }
     )
@@ -3397,7 +3771,7 @@ def teacher_student_wrongs_practice(student_id):
 
 @bp.route("/api/teacher/practices", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_list_practices():
     limit, offset = parse_limit_offset()
     student_id = parse_int(request.args.get("student_id"), None)
@@ -3461,7 +3835,7 @@ def teacher_list_practices():
 
 @bp.route("/api/teacher/practices/<practice_exam_id>/archive", methods=["POST"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_archive_practice(practice_exam_id):
     practice = g.db.query(Exam).filter(Exam.id == practice_exam_id, Exam.exam_type == "practice").first()
     if not practice:
@@ -3475,7 +3849,7 @@ def teacher_archive_practice(practice_exam_id):
 
 @bp.route("/api/teacher/students/<int:student_id>/practice_effects", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_student_practice_effects(student_id):
     student, _class_row, error_resp = ensure_student_access(student_id)
     if error_resp:
@@ -3573,7 +3947,7 @@ def teacher_student_practice_effects(student_id):
 
 @bp.route("/api/teacher/exports/scores", methods=["POST"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_export_scores():
     data = request.get_json(silent=True) or {}
     class_id = parse_int(data.get("class_id"), None)
@@ -3644,7 +4018,7 @@ def teacher_export_scores():
 
 @bp.route("/api/teacher/exports/wrongs", methods=["POST"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_export_wrongs():
     data = request.get_json(silent=True) or {}
     class_id = parse_int(data.get("class_id"), None)
@@ -3754,7 +4128,7 @@ def teacher_export_wrongs():
 
 @bp.route("/api/teacher/students/<int:student_id>/analysis", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_student_analysis(student_id):
     student, _class_row, error_resp = ensure_student_access(student_id)
     if error_resp:
@@ -3849,7 +4223,7 @@ def teacher_student_analysis(student_id):
 
 @bp.route("/api/teacher/classes/<int:class_id>/analysis", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["assistant"])
 def teacher_class_analysis(class_id):
     return v1_error("not_found", status=404, reason="class analysis is not enabled")
     class_row, error_resp = ensure_class_access(class_id)
@@ -3959,6 +4333,6 @@ def teacher_class_analysis(class_id):
 @bp.route("/api/exports/<path:filename>", methods=["GET"])
 @bp.route("/exports/<path:filename>", methods=["GET"])
 @login_required(api=True)
-@role_required(["teacher", "admin"])
+@role_required(["teacher", "assistant"])
 def download_export(filename):
     return send_from_directory(EXPORT_DIR, filename, as_attachment=True)
