@@ -1,21 +1,21 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>&#30331;&#24405; | &#27979;&#39564;&#31995;&#32479;</title>
+  <title>登录 | 测验系统</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body class="cx-login">
   <div class="cx-login-wrap">
     <div class="cx-login-panel">
-      <section class="cx-login-left" aria-label="&#24179;&#21488;&#20171;&#32461;">
+      <section class="cx-login-left" aria-label="平台介绍">
         <div class="cx-login-left-head">
-          <div class="cx-login-brand">&#27979;&#39564;&#31995;&#32479;</div>
-          <span class="cx-login-tag">&#38656;&#35201;&#30331;&#24405;</span>
+          <div class="cx-login-brand">测验系统</div>
+          <span class="cx-login-tag">需要登录</span>
         </div>
-        <h1>&#27426;&#36814;&#20351;&#29992;&#25945;&#23398;&#27979;&#35797;&#24179;&#21488;</h1>
-        <p>&#31649;&#29702;&#21592;&#31649;&#29702;&#23398;&#26657;&#19982;&#25945;&#24072;&#36134;&#21495;&#65292;&#21161;&#25945;&#22788;&#29702;&#39064;&#24211;&#19982;&#19994;&#21153;&#65292;&#25945;&#24072;&#36127;&#36131;&#35838;&#22530;&#27979;&#39564;&#65292;&#23398;&#29983;&#36127;&#36131;&#20316;&#31572;&#19982;&#35760;&#24405;&#26597;&#35810;&#12290;</p>
+        <h1>欢迎使用教师测验平台</h1>
+        <p>管理员管学校和教师，助教管题库与业务，教师负责课堂测验与结果查看。</p>
         <div class="cx-illus-shell" aria-hidden="true">
           <div class="cx-illus-ring"></div>
           <div class="cx-illus-ring cx-illus-ring-b"></div>
@@ -25,25 +25,24 @@
           <div class="cx-illus-chip cx-chip-c"></div>
           <div class="cx-illus-chip cx-chip-d"></div>
         </div>
-        <div class="cx-login-slogan">&#26412;&#22320;&#37096;&#32626; &middot; &#22810;&#35282;&#33394;&#20998;&#24037; &middot; &#25968;&#25454;&#38381;&#29615;</div>
+        <div class="cx-login-slogan">本地部署 · 多角色分工 · 数据闭环</div>
       </section>
 
-      <section class="cx-login-right" aria-label="&#36134;&#21495;&#30331;&#24405;&#34920;&#21333;">
-        <div class="cx-login-right-head"><div class="pill">&#36134;&#21495;&#30331;&#24405;</div></div>
+      <section class="cx-login-right" aria-label="账号登录表单">
+        <div class="cx-login-right-head"><div class="pill">账号登录</div></div>
         <div class="cx-role-row">
-          <button class="btn secondary" type="button" data-role="admin">&#31649;&#29702;&#21592;</button>
-          <button class="btn secondary" type="button" data-role="assistant">&#21161;&#25945;</button>
-          <button class="btn secondary" type="button" data-role="teacher">&#25945;&#24072;</button>
-          <button class="btn secondary" type="button" data-role="client">&#23398;&#29983;</button>
+          <button class="btn secondary" type="button" data-role="admin">管理员</button>
+          <button class="btn secondary" type="button" data-role="assistant">助教</button>
+          <button class="btn secondary" type="button" data-role="teacher">教师</button>
         </div>
-        <div class="status" id="role-hint">&#35831;&#36873;&#25321;&#35282;&#33394;&#24182;&#36755;&#20837;&#23545;&#24212;&#36134;&#21495;&#23494;&#30721;</div>
+        <div class="status" id="role-hint">管理员示例：admin / admin123</div>
         <div class="stack cx-login-form">
-          <div><label for="username">&#29992;&#25143;&#21517;</label><input id="username" type="text" placeholder="&#35831;&#36755;&#20837;&#29992;&#25143;&#21517;" autocomplete="username" /></div>
-          <div><label for="password">&#23494;&#30721;</label><input id="password" type="password" placeholder="&#35831;&#36755;&#20837;&#23494;&#30721;" autocomplete="current-password" /></div>
-          <div class="row"><button class="btn cx-login-submit" id="login-btn">&#30331;&#24405;</button></div>
+          <div><label for="username">用户名</label><input id="username" type="text" placeholder="admin" autocomplete="username" /></div>
+          <div><label for="password">密码</label><input id="password" type="password" placeholder="********" autocomplete="current-password" /></div>
+          <div class="row"><button class="btn cx-login-submit" id="login-btn">登录</button></div>
           <div class="status" id="status" role="alert" aria-live="polite"></div>
         </div>
-        <div class="footer">&#27979;&#39564;&#31995;&#32479; - &#20165;&#26412;&#22320;&#20351;&#29992; - &#38656;&#35201; Cookie</div>
+        <div class="footer">测验系统 - 仅本地使用 - 需要 Cookie</div>
       </section>
     </div>
   </div>
@@ -52,56 +51,48 @@
     const usernameEl = document.getElementById('username');
     const passwordEl = document.getElementById('password');
     const roleHint = document.getElementById('role-hint');
-    const roleButtons = Array.from(document.querySelectorAll('[data-role]'));
-    let currentRole = 'admin';
-
-    const roleMeta = {
-      admin: { label: '管理员', endpoint: '/login', target: '/admin', hint: '管理员用于学校与教师账号管理。' },
-      assistant: { label: '助教', endpoint: '/login', target: '/assistant', hint: '助教用于题库、班级、学生与考试业务。' },
-      teacher: { label: '教师', endpoint: '/login', target: '/teacher', hint: '教师用于查看班级、组卷、课堂看板与成绩统计。' },
-      client: { label: '学生', endpoint: '/client/login', target: '/submit', hint: '学生用于作答与查看个人记录。' },
-    };
-
-    function selectRole(role) {
-      currentRole = roleMeta[role] ? role : 'admin';
-      roleHint.textContent = roleMeta[currentRole].hint;
-      roleButtons.forEach((button) => button.classList.toggle('active', button.dataset.role === currentRole));
-      usernameEl.placeholder = `请输入${roleMeta[currentRole].label}用户名`;
-      passwordEl.placeholder = '请输入密码';
-      statusEl.textContent = '';
-      statusEl.className = 'status';
-    }
-
-    function targetByRole(role) {
-      return (roleMeta[role] || roleMeta.admin).target;
-    }
 
     document.getElementById('login-btn').addEventListener('click', login);
-    roleButtons.forEach((el) => {
-      el.addEventListener('click', () => selectRole(el.dataset.role));
+    document.querySelectorAll('[data-role]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const role = el.dataset.role;
+        if (role === 'teacher') {
+          usernameEl.value = 'teacher';
+          passwordEl.value = 'teacher123';
+          roleHint.textContent = '教师示例：teacher / teacher123';
+        } else if (role === 'assistant') {
+          usernameEl.value = 'assistant';
+          passwordEl.value = 'assistant123';
+          roleHint.textContent = '助教示例：assistant / assistant123';
+        } else {
+          usernameEl.value = 'admin';
+          passwordEl.value = 'admin123';
+          roleHint.textContent = '管理员示例：admin / admin123';
+        }
+      });
     });
 
+    function targetByRole(role) {
+      if (role === 'admin') return '/admin';
+      if (role === 'assistant') return '/assistant';
+      if (role === 'teacher') return '/teacher';
+      return '/';
+    }
+
     async function login() {
-      const endpoint = roleMeta[currentRole].endpoint;
       statusEl.textContent = '登录中...';
       statusEl.className = 'status';
       try {
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({ username: usernameEl.value.trim(), password: passwordEl.value }),
-        });
-        const data = await res.json().catch(() => ({}));
+        const res = await fetch('/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: usernameEl.value.trim(), password: passwordEl.value }) });
+        const data = await res.json();
         if (!res.ok) {
-          statusEl.textContent = data.error || data.message || '登录失败';
+          statusEl.textContent = data.error || '登录失败';
           statusEl.className = 'status error';
           return;
         }
-        const nextRole = data.role || currentRole;
         statusEl.textContent = '登录成功，正在跳转...';
         statusEl.className = 'status ok';
-        setTimeout(() => (window.location.href = targetByRole(nextRole)), 300);
+        setTimeout(() => (window.location.href = targetByRole(data.role)), 400);
       } catch (err) {
         statusEl.textContent = '请求失败: ' + err;
         statusEl.className = 'status error';
@@ -110,16 +101,12 @@
 
     (async function checkSession() {
       try {
-        const res = await fetch('/auth/status', { credentials: 'same-origin' });
+        const res = await fetch('/auth/status');
         if (!res.ok) return;
         const data = await res.json();
-        if (data.authenticated) {
-          window.location.href = targetByRole(data.role || 'admin');
-        }
+        if (data.authenticated) window.location.href = targetByRole(data.role);
       } catch (err) {}
     })();
-
-    selectRole('admin');
   </script>
 </body>
 </html>
