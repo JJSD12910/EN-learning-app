@@ -16,7 +16,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from .api_response import api_error, api_ok, parse_pagination
-from .auth import issue_session, login_required, parse_validity_datetime, role_required, teacher_account_is_currently_valid
+from .auth import ensure_password_hash, issue_session, login_required, parse_validity_datetime, role_required, teacher_account_is_currently_valid, verify_password
 from .db import DATA_DIR, FRONTEND_DIR, STATIC_DIR
 from .models import (
     Answer,
@@ -174,13 +174,13 @@ def validate_credentials(db: Session, username: str, password: str, model):
     password = (password or "").strip()
     if not username or not password:
         return False, None, None
-    user = db.query(model).filter(model.username == username, model.password == password).first()
+    user = db.query(model).filter(model.username == username).first()
     if user is not None and hasattr(user, "is_active"):
         if int(getattr(user, "is_active", 1) or 0) != 1:
             return False, None, None
     if user and model is User and not teacher_account_is_currently_valid(user):
         return False, None, None
-    if user:
+    if user and verify_password(db, user, password):
         role = getattr(user, "role", None) or ("admin" if model is User else "client")
         return True, username, role
     return False, None, None
@@ -1256,7 +1256,7 @@ def admin_create_teacher():
     with transactional(g.db):
         row = User(
             username=username,
-            password=password,
+            password=ensure_password_hash(password),
             role="teacher",
             display_name=display_name,
             is_active=1,
@@ -1333,7 +1333,7 @@ def admin_reset_teacher_password(username):
     if not row:
         return api_error("teacher not found", status=404)
     with transactional(g.db):
-        row.password = new_password
+        row.password = ensure_password_hash(new_password)
         row.updated_at = utc_now_iso()
         g.db.query(SessionToken).filter(SessionToken.user == row.username).delete()
         add_audit_log("RESET_TEACHER_PASSWORD", target_type="users", target_id=row.username)
@@ -1408,7 +1408,7 @@ def admin_create_client_user():
     with transactional(g.db):
         row = ClientUser(
             username=username,
-            password=password,
+            password=ensure_password_hash(password),
             is_active=1,
             created_at=now_str,
             updated_at=now_str,
@@ -1474,7 +1474,7 @@ def admin_reset_client_password(username):
     if not row:
         return api_error("client user not found", status=404)
     with transactional(g.db):
-        row.password = new_password
+        row.password = ensure_password_hash(new_password)
         row.updated_at = utc_now_iso()
         g.db.query(SessionToken).filter(SessionToken.user == row.username).delete()
         add_audit_log("RESET_CLIENT_PASSWORD", target_type="client_users", target_id=row.username)

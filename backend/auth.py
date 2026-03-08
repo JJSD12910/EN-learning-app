@@ -7,10 +7,12 @@ from typing import Optional
 
 from flask import g, jsonify, redirect, request
 from sqlalchemy.orm import Session
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from .models import ClientUser, SessionToken, User
 
 SESSION_TTL_SECONDS = 24 * 3600
+HASHED_PASSWORD_PREFIXES = ("pbkdf2:", "scrypt:")
 
 
 def _api_error_payload(status: int):
@@ -39,6 +41,32 @@ def parse_validity_datetime(value, *, end_of_day: bool = False):
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+def is_password_hashed(value: Optional[str]) -> bool:
+    text = str(value or "")
+    return text.startswith(HASHED_PASSWORD_PREFIXES)
+
+
+def ensure_password_hash(password: Optional[str]) -> str:
+    text = str(password or "")
+    if is_password_hashed(text):
+        return text
+    return generate_password_hash(text)
+
+
+def verify_password(db: Session, row, raw_password: Optional[str]) -> bool:
+    stored_password = str(getattr(row, "password", "") or "")
+    candidate = str(raw_password or "")
+    if not stored_password or not candidate:
+        return False
+    if is_password_hashed(stored_password):
+        return check_password_hash(stored_password, candidate)
+    if stored_password != candidate:
+        return False
+    row.password = ensure_password_hash(candidate)
+    db.commit()
+    return True
 
 
 def teacher_account_is_currently_valid(user_row, now=None):
