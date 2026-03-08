@@ -28,6 +28,76 @@
   --output-panel-muted: #6f7fa3;
 }
 
+body.cx-admin {
+  --bg: #eef2ff;
+  --bg-soft: #f6f8ff;
+  --panel: #ffffff;
+  --panel-strong: #f7f9ff;
+  --border: #d7dff3;
+  --line: #e8ecf8;
+  --accent: #4f46e5;
+  --accent-2: #0891b2;
+  --accent-soft: #e7ebff;
+  --text: #111827;
+  --muted: #5b647a;
+  --brand-1: #4f46e5;
+  --brand-2: #6d5efc;
+  --brand-3: #22c1d6;
+}
+
+body.cx-assistant,
+body.cx-teacher[data-role-theme="assistant"] {
+  --bg: #f6f7f0;
+  --bg-soft: #fbfbf6;
+  --panel: #fffef9;
+  --panel-strong: #f8f7f1;
+  --border: #dfe6cf;
+  --line: #ebefdf;
+  --accent: #0f766e;
+  --accent-2: #ca8a04;
+  --accent-soft: #e6f5ef;
+  --text: #1b2a24;
+  --muted: #5d6e66;
+  --brand-1: #0f766e;
+  --brand-2: #1d9a76;
+  --brand-3: #d4a11d;
+}
+
+body.cx-teacher:not([data-role-theme="assistant"]),
+body.cx-teacher[data-role-theme="teacher"] {
+  --bg: #f4f6fb;
+  --bg-soft: #f9fbff;
+  --panel: #ffffff;
+  --panel-strong: #f5f8fd;
+  --border: #d8e3f2;
+  --line: #e6edf8;
+  --accent: #2563eb;
+  --accent-2: #0f766e;
+  --accent-soft: #e8f0ff;
+  --text: #0f172a;
+  --muted: #5c6b82;
+  --brand-1: #2563eb;
+  --brand-2: #3b82f6;
+  --brand-3: #0f766e;
+}
+
+body.cx-client {
+  --bg: #fff9f2;
+  --bg-soft: #fffdf9;
+  --panel: #ffffff;
+  --panel-strong: #fff8ef;
+  --border: #f1dfc8;
+  --line: #f5e8d7;
+  --accent: #c2410c;
+  --accent-2: #0f766e;
+  --accent-soft: #fff0df;
+  --text: #2b2116;
+  --muted: #78614b;
+  --brand-1: #c2410c;
+  --brand-2: #ea580c;
+  --brand-3: #0f766e;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -569,6 +639,90 @@ pre.cx-output-panel:empty::before,
   border: 1px solid #d2def8;
   border-radius: 999px;
   padding: 2px 8px;
+}
+
+.cx-question-list-board {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cx-question-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.cx-question-item:hover,
+.cx-question-item:focus-visible,
+.cx-question-item.is-active {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  box-shadow: 0 14px 30px rgba(22, 30, 67, 0.12);
+  outline: none;
+}
+
+.cx-question-item-index {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.cx-question-item-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cx-question-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cx-question-item-head strong {
+  font-size: 14px;
+}
+
+.cx-question-item-stem {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cx-question-item-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cx-smart-output .cx-smart-chips {
@@ -1601,7 +1755,8 @@ body.cx-app {
 }
 
 /* Admin page: align controls and action buttons consistently */
-body.cx-admin .admin-panel .row {
+body.cx-admin .admin-panel .row,
+body.cx-assistant .admin-panel .row {
   align-items: center;
   gap: 12px;
 }
@@ -1609,11 +1764,16 @@ body.cx-admin .admin-panel .row {
 body.cx-admin .admin-panel .row > input[type="text"],
 body.cx-admin .admin-panel .row > input[type="password"],
 body.cx-admin .admin-panel .row > input[type="datetime-local"],
-body.cx-admin .admin-panel .row > select {
+body.cx-admin .admin-panel .row > select,
+body.cx-assistant .admin-panel .row > input[type="text"],
+body.cx-assistant .admin-panel .row > input[type="password"],
+body.cx-assistant .admin-panel .row > input[type="datetime-local"],
+body.cx-assistant .admin-panel .row > select {
   min-height: 44px;
 }
 
-body.cx-admin .admin-panel .btn {
+body.cx-admin .admin-panel .btn,
+body.cx-assistant .admin-panel .btn {
   min-height: 42px;
   min-width: 106px;
 }
@@ -1622,7 +1782,12 @@ body.cx-admin #teachers-table td:last-child,
 body.cx-admin #clients-table td:last-child,
 body.cx-admin #classes-table td:last-child,
 body.cx-admin #students-table td:last-child,
-body.cx-admin #attempts-table td:last-child {
+body.cx-admin #attempts-table td:last-child,
+body.cx-assistant #teachers-table td:last-child,
+body.cx-assistant #clients-table td:last-child,
+body.cx-assistant #classes-table td:last-child,
+body.cx-assistant #students-table td:last-child,
+body.cx-assistant #attempts-table td:last-child {
   white-space: nowrap;
 }
 
@@ -1630,7 +1795,12 @@ body.cx-admin #teachers-table td:last-child .btn,
 body.cx-admin #clients-table td:last-child .btn,
 body.cx-admin #classes-table td:last-child .btn,
 body.cx-admin #students-table td:last-child .btn,
-body.cx-admin #attempts-table td:last-child .btn {
+body.cx-admin #attempts-table td:last-child .btn,
+body.cx-assistant #teachers-table td:last-child .btn,
+body.cx-assistant #clients-table td:last-child .btn,
+body.cx-assistant #classes-table td:last-child .btn,
+body.cx-assistant #students-table td:last-child .btn,
+body.cx-assistant #attempts-table td:last-child .btn {
   margin-right: 6px;
 }
 
@@ -1638,8 +1808,58 @@ body.cx-admin #teachers-table td:last-child .btn:last-child,
 body.cx-admin #clients-table td:last-child .btn:last-child,
 body.cx-admin #classes-table td:last-child .btn:last-child,
 body.cx-admin #students-table td:last-child .btn:last-child,
-body.cx-admin #attempts-table td:last-child .btn:last-child {
+body.cx-admin #attempts-table td:last-child .btn:last-child,
+body.cx-assistant #teachers-table td:last-child .btn:last-child,
+body.cx-assistant #clients-table td:last-child .btn:last-child,
+body.cx-assistant #classes-table td:last-child .btn:last-child,
+body.cx-assistant #students-table td:last-child .btn:last-child,
+body.cx-assistant #attempts-table td:last-child .btn:last-child {
   margin-right: 0;
+}
+
+body.cx-admin .cx-topbar {
+  border-color: #4b53cf;
+}
+
+body.cx-assistant .cx-topbar,
+body.cx-teacher[data-role-theme="assistant"] .cx-topbar {
+  border-color: #0e6b65;
+  box-shadow: 0 14px 34px rgba(18, 97, 84, 0.28);
+}
+
+body.cx-assistant .cx-sidebar,
+body.cx-teacher[data-role-theme="assistant"] .cx-sidebar {
+  background: linear-gradient(185deg, #14766f 0%, #1d8b73 62%, #b88918 100%);
+  border-color: #186f64;
+  box-shadow: 0 14px 30px rgba(23, 96, 82, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+body.cx-assistant .cx-avatar-circle,
+body.cx-teacher[data-role-theme="assistant"] .cx-avatar-circle {
+  background: linear-gradient(135deg, #eef8f3, #d9efe3);
+  color: #0f766e;
+}
+
+body.cx-teacher:not([data-role-theme="assistant"]) .cx-topbar,
+body.cx-teacher[data-role-theme="teacher"] .cx-topbar {
+  border-color: #1d5fd8;
+  box-shadow: 0 14px 34px rgba(39, 97, 206, 0.26);
+}
+
+body.cx-client .cx-topbar {
+  border-color: #c96a2d;
+  box-shadow: 0 14px 34px rgba(190, 100, 35, 0.22);
+}
+
+body.cx-client .cx-sidebar {
+  background: linear-gradient(185deg, #c2410c 0%, #ea580c 62%, #0f766e 100%);
+  border-color: #b45309;
+  box-shadow: 0 14px 30px rgba(180, 90, 22, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+body.cx-client .cx-avatar-circle {
+  background: linear-gradient(135deg, #fff3e2, #ffe0bf);
+  color: #c2410c;
 }
 
 /* Teacher page: keep layout, loosen spacing and control size */
@@ -1799,5 +2019,32 @@ body.cx-teacher .cx-output-panel {
   .cx-top-actions {
     width: 100%;
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .cx-top-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .cx-top-chip,
+  .cx-logout-btn {
+    min-height: 34px;
+  }
+
+  .cx-question-item {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .cx-question-item-index {
+    width: 28px;
+    height: 28px;
+  }
+
+  .cx-question-item-head {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

@@ -2290,14 +2290,14 @@ def teacher_create_class():
     school = g.db.query(School).filter(School.id == school_id).first()
     if not school:
         return api_error("school not found", status=404)
-    teacher_username = getattr(g, "current_user", None)
-    if getattr(g, "current_role", None) == "admin" and data.get("teacher_username"):
-        teacher_username = data.get("teacher_username")
-    teacher = g.db.query(User).filter(User.username == teacher_username).first()
-    if not teacher:
-        return api_error("teacher user not found", status=404)
-    if teacher.role != "teacher" or int(teacher.is_active or 0) != 1:
-        return api_error("teacher user must be active teacher", status=409)
+    teacher_username = (data.get("teacher_username") or "").strip() or None
+    teacher = None
+    if teacher_username:
+        teacher = g.db.query(User).filter(User.username == teacher_username).first()
+        if not teacher:
+            return api_error("teacher user not found", status=404)
+        if teacher.role != "teacher" or int(teacher.is_active or 0) != 1:
+            return api_error("teacher user must be active teacher", status=409)
     with transactional(g.db):
         row = SchoolClass(
             school_id=school_id,
@@ -2891,6 +2891,7 @@ def teacher_exam_question_stats(exam_id):
     qids = [row.question_id for row in links]
     questions = g.db.query(Question).filter(Question.id.in_(qids)).all() if qids else []
     qmap = {q.id: q for q in questions}
+    option_limit_map = {q.id: max(4, len(json.loads(q.options or "[]"))) for q in questions}
 
     submitted_attempts = (
         g.db.query(Attempt)
@@ -2907,11 +2908,19 @@ def teacher_exam_question_stats(exam_id):
     answer_rows = g.db.query(Answer).filter(Answer.attempt_id.in_(attempt_ids)).all() if attempt_ids else []
     stats_map = {}
     for row in answer_rows:
+        if row.your is None:
+            continue
+        try:
+            option_index = int(row.your)
+        except (TypeError, ValueError):
+            continue
+        option_limit = option_limit_map.get(row.question_id, 4)
+        if option_index < 0 or option_index >= option_limit:
+            continue
         item = stats_map.setdefault(
             row.question_id,
             {"answer_count": 0, "correct_count": 0, "option_counts": {}},
         )
-        option_index = int(row.your or 0)
         item["answer_count"] += 1
         item["option_counts"][option_index] = int(item["option_counts"].get(option_index, 0)) + 1
         if int(row.is_correct or 0) == 1:
