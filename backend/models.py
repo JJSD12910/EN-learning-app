@@ -78,10 +78,16 @@ class Record(Base):
 
 class SessionToken(Base):
     __tablename__ = "sessions"
-    __table_args__ = (Index("idx_sessions_user", "user"), Index("idx_sessions_ts", "ts"))
+    __table_args__ = (
+        Index("idx_sessions_user", "user"),
+        Index("idx_sessions_principal_type", "principal_type"),
+        Index("idx_sessions_user_principal_type", "user", "principal_type"),
+        Index("idx_sessions_ts", "ts"),
+    )
 
     token = Column(Text, primary_key=True)
     user = Column(Text, nullable=False)
+    principal_type = Column(String(20), nullable=False, default="user", server_default="user")
     ts = Column(Float, nullable=False)
 
 

@@ -1,16 +1,18 @@
 import re
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Optional
 
 from flask import g, jsonify, redirect, request
 from sqlalchemy.orm import Session
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from .models import ClientUser, SessionToken, User
 
 SESSION_TTL_SECONDS = 24 * 3600
+HASHED_PASSWORD_PREFIXES = ("pbkdf2:", "scrypt:")
 
 
 def _api_error_payload(status: int):
@@ -55,9 +57,65 @@ def teacher_account_is_currently_valid(user_row, now=None):
     return True
 
 
-def issue_session(db: Session, username: str) -> str:
+def normalize_principal_type(value: Optional[str]) -> str:
+    return "client" if str(value or "").strip().lower() == "client" else "user"
+
+
+def is_password_hashed(value: Optional[str]) -> bool:
+    text = str(value or "")
+    return text.startswith(HASHED_PASSWORD_PREFIXES)
+
+
+def ensure_password_hash(password: Optional[str]) -> str:
+    text = str(password or "")
+    if is_password_hashed(text):
+        return text
+    return generate_password_hash(text)
+
+
+def verify_password(db: Session, row, raw_password: Optional[str]) -> bool:
+    stored_password = str(getattr(row, "password", "") or "")
+    candidate = str(raw_password or "")
+    if not stored_password or not candidate:
+        return False
+    if is_password_hashed(stored_password):
+        return check_password_hash(stored_password, candidate)
+    if stored_password != candidate:
+        return False
+    row.password = ensure_password_hash(candidate)
+    db.commit()
+    return True
+
+
+def apply_session_cookie(response, token: str, *, secure: bool):
+    response.set_cookie(
+        "session",
+        token,
+        httponly=True,
+        samesite="Strict",
+        secure=bool(secure),
+        max_age=SESSION_TTL_SECONDS,
+        path="/",
+    )
+    return response
+
+
+def clear_session_cookie(response, *, secure: bool):
+    response.set_cookie(
+        "session",
+        "",
+        expires=0,
+        httponly=True,
+        samesite="Strict",
+        secure=bool(secure),
+        path="/",
+    )
+    return response
+
+
+def issue_session(db: Session, username: str, principal_type: str) -> str:
     token = uuid.uuid4().hex
-    db.merge(SessionToken(token=token, user=username, ts=time.time()))
+    db.add(SessionToken(token=token, user=username, principal_type=normalize_principal_type(principal_type), ts=time.time()))
     db.commit()
     return token
 
@@ -80,21 +138,24 @@ def resolve_user(db: Session, req) -> Optional[dict]:
         return None
     session.ts = time.time()
     db.commit()
-    user_row = db.query(User).filter(User.username == session.user).first()
-    if user_row:
+    principal_type = normalize_principal_type(getattr(session, "principal_type", None))
+    if principal_type == "user":
+        user_row = db.query(User).filter(User.username == session.user).first()
+        if not user_row:
+            return None
         if int(getattr(user_row, "is_active", 1) or 0) != 1 or not teacher_account_is_currently_valid(user_row):
             db.delete(session)
             db.commit()
             return None
         return {"username": user_row.username, "role": user_row.role or "admin"}
     client_row = db.query(ClientUser).filter(ClientUser.username == session.user).first()
-    if client_row:
-        if int(getattr(client_row, "is_active", 1) or 0) != 1:
-            db.delete(session)
-            db.commit()
-            return None
-        return {"username": client_row.username, "role": "client"}
-    return None
+    if not client_row:
+        return None
+    if int(getattr(client_row, "is_active", 1) or 0) != 1:
+        db.delete(session)
+        db.commit()
+        return None
+    return {"username": client_row.username, "role": "client"}
 
 
 def login_required(api: bool = True):
