@@ -1,18 +1,18 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>&#30331;&#24405; | &#27979;&#39564;&#31995;&#32479;</title>
+  <title>登录 | 测验系统</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body class="cx-login">
   <div class="cx-login-wrap">
     <div class="cx-login-panel">
-      <section class="cx-login-left" aria-label="&#24179;&#21488;&#20171;&#32461;">
+      <section class="cx-login-left" aria-label="平台介绍">
         <div class="cx-login-left-head">
-          <div class="cx-login-brand">&#27979;&#39564;&#31995;&#32479;</div>
-          <span class="cx-login-tag">&#38656;&#35201;&#30331;&#24405;</span>
+          <div class="cx-login-brand">测验系统</div>
+          <span class="cx-login-tag">需要登录</span>
         </div>
         <h1>&#27426;&#36814;&#20351;&#29992;&#25945;&#23398;&#27979;&#35797;&#24179;&#21488;</h1>
         <p>&#31649;&#29702;&#21592;&#31649;&#29702;&#23398;&#26657;&#21644;&#25945;&#24072;&#65292;&#21161;&#25945;&#36127;&#36131;&#39064;&#24211;&#19982;&#19994;&#21153;&#65292;&#25945;&#24072;&#36127;&#36131;&#35838;&#22530;&#27979;&#39564;&#19982;&#32467;&#26524;&#26597;&#30475;&#12290;</p>
@@ -25,11 +25,11 @@
           <div class="cx-illus-chip cx-chip-c"></div>
           <div class="cx-illus-chip cx-chip-d"></div>
         </div>
-        <div class="cx-login-slogan">&#26412;&#22320;&#37096;&#32626; &middot; &#22810;&#35282;&#33394;&#20998;&#24037; &middot; &#25968;&#25454;&#38381;&#29615;</div>
+        <div class="cx-login-slogan">本地部署 · 多角色分工 · 数据闭环</div>
       </section>
 
-      <section class="cx-login-right" aria-label="&#36134;&#21495;&#30331;&#24405;&#34920;&#21333;">
-        <div class="cx-login-right-head"><div class="pill">&#36134;&#21495;&#30331;&#24405;</div></div>
+      <section class="cx-login-right" aria-label="账号登录表单">
+        <div class="cx-login-right-head"><div class="pill">账号登录</div></div>
         <div class="cx-role-row">
           <button class="btn secondary" type="button" data-role="admin">&#31649;&#29702;&#21592;</button>
           <button class="btn secondary" type="button" data-role="assistant">&#21161;&#25945;</button>
@@ -42,7 +42,7 @@
           <div class="row"><button class="btn cx-login-submit" id="login-btn">&#30331;&#24405;</button></div>
           <div class="status" id="status" role="alert" aria-live="polite"></div>
         </div>
-        <div class="footer">&#27979;&#39564;&#31995;&#32479; - &#20165;&#26412;&#22320;&#20351;&#29992; - &#38656;&#35201; Cookie</div>
+        <div class="footer">测验系统 - 仅本地使用 - 需要 Cookie</div>
       </section>
     </div>
   </div>
@@ -77,6 +77,10 @@
       if (role === 'assistant') return '/assistant';
       if (role === 'teacher') return '/teacher';
       return '/';
+      if (role === 'admin') return '/admin';
+      if (role === 'assistant') return '/assistant';
+      if (role === 'teacher') return '/teacher';
+      return '/';
     }
 
     async function login() {
@@ -92,11 +96,13 @@
         const data = await res.json();
         if (!res.ok) {
           statusEl.textContent = data.error || '登录失败';
+          statusEl.textContent = data.error || '登录失败';
           statusEl.className = 'status error';
           return;
         }
         statusEl.textContent = '登录成功，正在跳转...';
         statusEl.className = 'status ok';
+        setTimeout(() => (window.location.href = targetByRole(data.role)), 400);
         setTimeout(() => (window.location.href = targetByRole(data.role)), 400);
       } catch (err) {
         statusEl.textContent = '请求失败: ' + err;
@@ -106,9 +112,10 @@
 
     (async function checkSession() {
       try {
-        const res = await fetch('/auth/status', { credentials: 'same-origin' });
+        const res = await fetch('/auth/status');
         if (!res.ok) return;
         const data = await res.json();
+        if (data.authenticated) window.location.href = targetByRole(data.role);
         if (data.authenticated) window.location.href = targetByRole(data.role);
       } catch (err) {}
     })();

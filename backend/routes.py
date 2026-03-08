@@ -16,17 +16,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from .api_response import api_error, api_ok, parse_pagination
-from .auth import (
-    apply_session_cookie,
-    clear_session_cookie,
-    ensure_password_hash,
-    issue_session,
-    login_required,
-    parse_validity_datetime,
-    role_required,
-    teacher_account_is_currently_valid,
-    verify_password,
-)
+from .auth import issue_session, login_required, parse_validity_datetime, role_required, teacher_account_is_currently_valid
 from .db import DATA_DIR, FRONTEND_DIR, STATIC_DIR
 from .models import (
     Answer,
@@ -184,13 +174,13 @@ def validate_credentials(db: Session, username: str, password: str, model):
     password = (password or "").strip()
     if not username or not password:
         return False, None, None
-    user = db.query(model).filter(model.username == username).first()
+    user = db.query(model).filter(model.username == username, model.password == password).first()
     if user is not None and hasattr(user, "is_active"):
         if int(getattr(user, "is_active", 1) or 0) != 1:
             return False, None, None
     if user and model is User and not teacher_account_is_currently_valid(user):
         return False, None, None
-    if user and verify_password(db, user, password):
+    if user:
         role = getattr(user, "role", None) or ("admin" if model is User else "client")
         return True, username, role
     return False, None, None
@@ -765,10 +755,10 @@ def login_api():
     user_row = g.db.query(User).filter(User.username == user).first()
     if user_row:
         user_row.last_login_at = utc_now_iso()
-        g.db.commit()
-    token = issue_session(g.db, user, "user")
+    token = issue_session(g.db, user)
     resp = jsonify({"status": "ok", "user": user, "token": token, "role": role})
-    return apply_session_cookie(resp, token, secure=request.is_secure)
+    resp.set_cookie("session", token, httponly=True, samesite="Lax", path="/")
+    return resp
 
 
 @bp.route("/client/login", methods=["POST"])
@@ -784,8 +774,7 @@ def client_login():
     client_row = g.db.query(ClientUser).filter(ClientUser.username == user).first()
     if client_row:
         client_row.last_login_at = utc_now_iso()
-        g.db.commit()
-    token = issue_session(g.db, user, "client")
+    token = issue_session(g.db, user)
     print(f"[client-login] success user={username!r} ip={client_ip}")
     return jsonify({"ok": True, "user": user, "token": token})
 
@@ -793,14 +782,12 @@ def client_login():
 @bp.route("/logout")
 def logout():
     token = request.cookies.get("session")
-    auth_header = request.headers.get("Authorization", "")
-    if not token and auth_header.startswith("Bearer "):
-        token = auth_header.split(" ", 1)[1].strip()
     if token:
         g.db.query(SessionToken).filter(SessionToken.token == token).delete()
         g.db.commit()
     resp = redirect("/login")
-    return clear_session_cookie(resp, secure=request.is_secure)
+    resp.set_cookie("session", "", expires=0, path="/")
+    return resp
 
 
 @bp.route("/static/<path:filename>")
@@ -897,17 +884,7 @@ def questions():
 @login_required(api=True)
 def records_json():
     limit_val, offset_val = parse_pagination(default_limit=20, max_limit=500)
-    role = getattr(g, "current_role", None)
-    current_user = getattr(g, "current_user", None)
-    query = g.db.query(Record)
-    if role == "client":
-        query = query.filter(Record.user_id == current_user)
-    elif role not in {"assistant", "admin"}:
-        return jsonify({"error": "forbidden"}), 403
-    record_id = (request.args.get("id") or "").strip()
-    if record_id:
-        query = query.filter(Record.id == record_id)
-    query = query.order_by(Record.timestamp.desc())
+    query = g.db.query(Record).order_by(Record.timestamp.desc())
     total = query.count()
     records = query.offset(offset_val).limit(limit_val).all()
     return jsonify({"records": [record_to_dict(r) for r in records], "total": total, "limit": limit_val, "offset": offset_val})
@@ -916,17 +893,13 @@ def records_json():
 @bp.route("/results.json")
 @login_required(api=True)
 def results_json():
-    rid = (request.args.get("id") or "").strip()
-    role = getattr(g, "current_role", None)
-    current_user = getattr(g, "current_user", None)
-    query = g.db.query(Record)
-    if role == "client":
-        query = query.filter(Record.user_id == current_user)
-    elif role not in {"assistant", "admin"}:
-        return jsonify({"error": "forbidden"}), 403
+    rid = request.args.get("id")
+    client_ip = request.remote_addr
+    record: Optional[Record] = None
     if rid:
-        query = query.filter(Record.id == rid)
-    record = query.order_by(Record.timestamp.desc()).first()
+        record = g.db.query(Record).filter(Record.id == rid).first()
+    else:
+        record = g.db.query(Record).filter(Record.client_ip == client_ip).order_by(Record.timestamp.desc()).first()
     if record:
         return jsonify({"record": record_to_dict(record)})
     return jsonify({"error": "no record found"}), 404
@@ -1237,13 +1210,6 @@ def _find_client_user(username: str) -> Optional[ClientUser]:
     return g.db.query(ClientUser).filter(ClientUser.username == username).first()
 
 
-def _username_exists_anywhere(username: str) -> bool:
-    username = str(username or "").strip()
-    if not username:
-        return False
-    return bool(g.db.query(User.id).filter(User.username == username).first() or g.db.query(ClientUser.id).filter(ClientUser.username == username).first())
-
-
 @bp.route("/api/admin/teachers", methods=["GET"])
 @login_required(api=True)
 @role_required(["admin", "assistant"])
@@ -1283,14 +1249,14 @@ def admin_create_teacher():
         return api_error("username is required", status=400)
     if not password or len(password) < 6:
         return api_error("password must be at least 6 chars", status=400)
-    exists = _username_exists_anywhere(username)
+    exists = g.db.query(User).filter(User.username == username).first()
     if exists:
-        return api_error("username already exists in another account namespace", status=409)
+        return api_error("username already exists", status=409)
     now_str = utc_now_iso()
     with transactional(g.db):
         row = User(
             username=username,
-            password=ensure_password_hash(password),
+            password=password,
             role="teacher",
             display_name=display_name,
             is_active=1,
@@ -1327,7 +1293,7 @@ def admin_enable_teacher(username):
     with transactional(g.db):
         row.is_active = 1
         row.updated_at = now_str
-        g.db.query(SessionToken).filter(SessionToken.user == row.username, SessionToken.principal_type == "user").delete()
+        g.db.query(SessionToken).filter(SessionToken.user == row.username).delete()
         add_audit_log("ENABLE_TEACHER", target_type="users", target_id=row.username)
     return api_ok({"teacher": user_to_admin_dict(row)})
 
@@ -1347,7 +1313,7 @@ def admin_disable_teacher(username):
     with transactional(g.db):
         row.is_active = 0
         row.updated_at = now_str
-        g.db.query(SessionToken).filter(SessionToken.user == row.username, SessionToken.principal_type == "user").delete()
+        g.db.query(SessionToken).filter(SessionToken.user == row.username).delete()
         add_audit_log("DISABLE_TEACHER", target_type="users", target_id=row.username)
     return api_ok({"teacher": user_to_admin_dict(row)})
 
@@ -1367,9 +1333,9 @@ def admin_reset_teacher_password(username):
     if not row:
         return api_error("teacher not found", status=404)
     with transactional(g.db):
-        row.password = ensure_password_hash(new_password)
+        row.password = new_password
         row.updated_at = utc_now_iso()
-        g.db.query(SessionToken).filter(SessionToken.user == row.username, SessionToken.principal_type == "user").delete()
+        g.db.query(SessionToken).filter(SessionToken.user == row.username).delete()
         add_audit_log("RESET_TEACHER_PASSWORD", target_type="users", target_id=row.username)
     return api_ok({"teacher": user_to_admin_dict(row)})
 
@@ -1435,14 +1401,14 @@ def admin_create_client_user():
         return api_error("username is required", status=400)
     if not password or len(password) < 6:
         return api_error("password must be at least 6 chars", status=400)
-    exists = _username_exists_anywhere(username)
+    exists = _find_client_user(username)
     if exists:
-        return api_error("username already exists in another account namespace", status=409)
+        return api_error("username already exists", status=409)
     now_str = utc_now_iso()
     with transactional(g.db):
         row = ClientUser(
             username=username,
-            password=ensure_password_hash(password),
+            password=password,
             is_active=1,
             created_at=now_str,
             updated_at=now_str,
@@ -1469,7 +1435,7 @@ def admin_enable_client_user(username):
     with transactional(g.db):
         row.is_active = 1
         row.updated_at = utc_now_iso()
-        g.db.query(SessionToken).filter(SessionToken.user == row.username, SessionToken.principal_type == "client").delete()
+        g.db.query(SessionToken).filter(SessionToken.user == row.username).delete()
         add_audit_log("ENABLE_CLIENT_USER", target_type="client_users", target_id=row.username)
     return api_ok({"client_user": client_user_to_admin_dict(row)})
 
@@ -1488,7 +1454,7 @@ def admin_disable_client_user(username):
     with transactional(g.db):
         row.is_active = 0
         row.updated_at = utc_now_iso()
-        g.db.query(SessionToken).filter(SessionToken.user == row.username, SessionToken.principal_type == "client").delete()
+        g.db.query(SessionToken).filter(SessionToken.user == row.username).delete()
         add_audit_log("DISABLE_CLIENT_USER", target_type="client_users", target_id=row.username)
     return api_ok({"client_user": client_user_to_admin_dict(row)})
 
@@ -1508,9 +1474,9 @@ def admin_reset_client_password(username):
     if not row:
         return api_error("client user not found", status=404)
     with transactional(g.db):
-        row.password = ensure_password_hash(new_password)
+        row.password = new_password
         row.updated_at = utc_now_iso()
-        g.db.query(SessionToken).filter(SessionToken.user == row.username, SessionToken.principal_type == "client").delete()
+        g.db.query(SessionToken).filter(SessionToken.user == row.username).delete()
         add_audit_log("RESET_CLIENT_PASSWORD", target_type="client_users", target_id=row.username)
     return api_ok({"client_user": client_user_to_admin_dict(row)})
 
@@ -2948,15 +2914,15 @@ def teacher_exam_question_stats(exam_id):
             option_index = int(row.your)
         except (TypeError, ValueError):
             continue
-        if option_index < 0:
+        option_limit = option_limit_map.get(row.question_id, 4)
+        if option_index < 0 or option_index >= option_limit:
             continue
         item = stats_map.setdefault(
             row.question_id,
-            {"answer_count": 0, "correct_count": 0, "option_counts": {}, "max_option_index": -1},
+            {"answer_count": 0, "correct_count": 0, "option_counts": {}},
         )
         item["answer_count"] += 1
         item["option_counts"][option_index] = int(item["option_counts"].get(option_index, 0)) + 1
-        item["max_option_index"] = max(int(item.get("max_option_index", -1)), option_index)
         if int(row.is_correct or 0) == 1:
             item["correct_count"] += 1
 
@@ -2971,22 +2937,15 @@ def teacher_exam_question_stats(exam_id):
         answer_count = int(stat.get("answer_count", 0))
         correct_count = int(stat.get("correct_count", 0))
         option_counts = stat.get("option_counts", {})
-        max_option_index = max(int(stat.get("max_option_index", -1)), max(option_counts.keys(), default=-1))
-        option_total = max(4, len(options), max_option_index + 1)
+        option_total = max(4, len(options))
         option_stats = []
         for option_index in range(option_total):
             option_label = chr(65 + option_index) if option_index < 26 else str(option_index + 1)
-            if option_index < len(options):
-                option_text = options[option_index]
-            elif int(option_counts.get(option_index, 0)) > 0:
-                option_text = f"[historical option {option_index + 1}]"
-            else:
-                option_text = ""
             option_stats.append(
                 {
                     "index": option_index,
                     "label": option_label,
-                    "text": option_text,
+                    "text": options[option_index] if option_index < len(options) else "",
                     "count": int(option_counts.get(option_index, 0)),
                     "is_correct": option_index == int(question.answer or 0),
                 }
@@ -4383,6 +4342,6 @@ def teacher_class_analysis(class_id):
 @bp.route("/api/exports/<path:filename>", methods=["GET"])
 @bp.route("/exports/<path:filename>", methods=["GET"])
 @login_required(api=True)
-@role_required(["assistant"])
+@role_required(["teacher", "assistant"])
 def download_export(filename):
     return send_from_directory(EXPORT_DIR, filename, as_attachment=True)
