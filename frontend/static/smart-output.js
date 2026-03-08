@@ -337,6 +337,7 @@
   }
 
   function renderEmpty(target, emptyText) {
+    if (!target) return;
     target.innerHTML = "";
     target.classList.add("cx-smart-output", "is-empty");
     const text = emptyText || target.dataset.empty || "No data";

@@ -1775,7 +1775,22 @@ def admin_list_students():
     query = query.order_by(StudentProfile.id.desc())
     total = query.count()
     rows = query.offset(offset).limit(limit).all()
-    return api_ok({"items": [student_to_dict(s) for s in rows], "total": total, "limit": limit, "offset": offset})
+    wrong_counts = {}
+    student_ids = [row.id for row in rows]
+    if student_ids:
+        count_rows = (
+            g.db.query(WrongQuestion.student_profile_id, func.count(WrongQuestion.question_id))
+            .filter(WrongQuestion.student_profile_id.in_(student_ids), WrongQuestion.is_active == 1)
+            .group_by(WrongQuestion.student_profile_id)
+            .all()
+        )
+        wrong_counts = {int(student_id): int(count or 0) for student_id, count in count_rows}
+    return api_ok({
+        "items": [student_to_dict(s, wrong_pool_active_count=wrong_counts.get(int(s.id), 0)) for s in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    })
 
 
 @bp.route("/api/admin/students/<int:student_id>", methods=["PUT"])
