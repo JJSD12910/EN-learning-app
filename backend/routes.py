@@ -22,6 +22,7 @@ from .models import (
     Answer,
     AppSetting,
     Attempt,
+    AttemptAnswer,
     AuditLog,
     ClientUser,
     Exam,
@@ -723,6 +724,149 @@ def exam_is_open_for_action(exam: Exam):
     if exam.status not in {"published", "active"}:
         return False, "exam is not open"
     return True, None
+
+
+def load_exam_question_bundle(exam_id: str):
+    links = g.db.query(ExamQuestion).filter(ExamQuestion.exam_id == exam_id).all()
+    question_ids = [row.question_id for row in links]
+    questions = g.db.query(Question).filter(Question.id.in_(question_ids)).all() if question_ids else []
+    return question_ids, {row.id: row for row in questions}
+
+
+def save_attempt_answer_row(attempt: Attempt, exam: Exam, question_id: str, choice: int, progress_count: int, duration_sec: Optional[int]):
+    saved_at = utc_now_iso()
+    normalized_progress = max(int(getattr(attempt, "progress_count", 0) or 0), int(progress_count))
+    existing_duration = parse_int(getattr(attempt, "duration_sec", None), None)
+    normalized_duration = existing_duration
+    if duration_sec is not None:
+        normalized_duration = max(existing_duration or 0, int(duration_sec)) if existing_duration is not None else int(duration_sec)
+    row = (
+        g.db.query(AttemptAnswer)
+        .filter(AttemptAnswer.attempt_id == attempt.id, AttemptAnswer.question_id == question_id)
+        .first()
+    )
+    if row:
+        row.choice = int(choice)
+        row.progress_count = normalized_progress
+        row.duration_sec = normalized_duration
+        row.last_answered_at = saved_at
+        row.updated_at = saved_at
+        if not row.first_answered_at:
+            row.first_answered_at = saved_at
+        if not row.created_at:
+            row.created_at = row.first_answered_at
+    else:
+        g.db.add(
+            AttemptAnswer(
+                id=uuid.uuid4().hex,
+                attempt_id=attempt.id,
+                exam_id=exam.id,
+                question_id=question_id,
+                choice=int(choice),
+                progress_count=normalized_progress,
+                duration_sec=normalized_duration,
+                first_answered_at=saved_at,
+                last_answered_at=saved_at,
+                created_at=saved_at,
+                updated_at=saved_at,
+            )
+        )
+    attempt.progress_count = normalized_progress
+    if normalized_duration is not None:
+        attempt.duration_sec = normalized_duration
+    return saved_at, normalized_progress, normalized_duration
+
+
+def finalize_attempt_submission(attempt: Attempt, exam: Exam, profile: StudentProfile, duration_sec: Optional[int]):
+    question_ids, question_map = load_exam_question_bundle(exam.id)
+    if not question_ids:
+        return None, v1_error("invalid params", status=400, code=40001, reason="exam has no questions")
+
+    saved_rows = g.db.query(AttemptAnswer).filter(AttemptAnswer.attempt_id == attempt.id).all()
+    saved_map = {row.question_id: row for row in saved_rows}
+    submitted_at = utc_now_iso()
+    score = 0
+    total = 0
+    wrong_training_config = load_wrong_training_config(g.db)
+    mastery_streak = int(wrong_training_config.get("mastery_streak") or WRONG_CLEAR_STREAK)
+    final_duration = parse_int(duration_sec, None)
+    if final_duration is None:
+        final_duration = parse_int(getattr(attempt, "duration_sec", None), None)
+
+    with transactional(g.db):
+        g.db.query(Answer).filter(Answer.attempt_id == attempt.id).delete()
+        for question_id in question_ids:
+            question = question_map.get(question_id)
+            if not question:
+                continue
+            total += 1
+            saved_row = saved_map.get(question_id)
+            your_value = int(saved_row.choice) if saved_row is not None else -1
+            correct = int(question.answer)
+            is_correct = 1 if your_value == correct else 0
+            avg_cost_ms = estimate_avg_cost_ms(final_duration, len(question_ids))
+            wrong_row = (
+                g.db.query(WrongQuestion)
+                .filter(WrongQuestion.student_profile_id == profile.id, WrongQuestion.question_id == question_id)
+                .first()
+            )
+            if is_correct:
+                score += 1
+                if wrong_row:
+                    next_streak = int(wrong_row.correct_streak or 0) + 1
+                    wrong_row.correct_streak = next_streak
+                    wrong_row.last_correct_at = submitted_at
+                    if avg_cost_ms is not None:
+                        history_avg = parse_int(getattr(wrong_row, "avg_cost_ms", None), None)
+                        wrong_row.avg_cost_ms = avg_cost_ms if history_avg is None else int((history_avg + avg_cost_ms) / 2)
+                    if next_streak >= mastery_streak:
+                        wrong_row.is_active = 0
+            else:
+                if wrong_row:
+                    wrong_row.wrong_count = int(wrong_row.wrong_count or 0) + 1
+                    wrong_row.correct_streak = 0
+                    wrong_row.is_active = 1
+                    wrong_row.last_wrong_at = submitted_at
+                    if avg_cost_ms is not None:
+                        history_avg = parse_int(getattr(wrong_row, "avg_cost_ms", None), None)
+                        wrong_row.avg_cost_ms = avg_cost_ms if history_avg is None else int((history_avg + avg_cost_ms) / 2)
+                else:
+                    g.db.add(
+                        WrongQuestion(
+                            student_profile_id=profile.id,
+                            question_id=question_id,
+                            wrong_count=1,
+                            correct_streak=0,
+                            is_active=1,
+                            last_wrong_at=submitted_at,
+                            last_correct_at=None,
+                            last_seen_at=None,
+                            avg_cost_ms=avg_cost_ms,
+                        )
+                    )
+            g.db.add(
+                Answer(
+                    id=uuid.uuid4().hex,
+                    attempt_id=attempt.id,
+                    question_id=question_id,
+                    your=your_value,
+                    correct=correct,
+                    is_correct=is_correct,
+                )
+            )
+        attempt.score = score
+        attempt.total = total
+        attempt.progress_count = max(int(getattr(attempt, "progress_count", 0) or 0), total)
+        attempt.submitted_at = submitted_at
+        attempt.duration_sec = final_duration
+
+    return {
+        "attempt_id": attempt.id,
+        "score": score,
+        "total": total,
+        "accuracy": normalized_accuracy(score, total),
+        "submitted_at": attempt.submitted_at,
+    }, None
 
 
 @bp.route("/health")
@@ -2887,47 +3031,44 @@ def teacher_exam_question_stats(exam_id):
     if error_resp:
         return error_resp
 
-    links = g.db.query(ExamQuestion).filter(ExamQuestion.exam_id == exam.id).all()
-    qids = [row.question_id for row in links]
-    questions = g.db.query(Question).filter(Question.id.in_(qids)).all() if qids else []
-    qmap = {q.id: q for q in questions}
-    option_limit_map = {q.id: max(4, len(json.loads(q.options or "[]"))) for q in questions}
+    qids, qmap = load_exam_question_bundle(exam.id)
+    option_limit_map = {q.id: max(4, len(json.loads(q.options or "[]"))) for q in qmap.values()}
 
-    submitted_attempts = (
+    latest_attempt_rows = (
         g.db.query(Attempt)
-        .filter(Attempt.exam_id == exam.id, Attempt.submitted_at.isnot(None))
-        .order_by(Attempt.submitted_at.desc())
+        .filter(Attempt.exam_id == exam.id)
+        .order_by(Attempt.started_at.desc())
         .all()
     )
     latest_attempts = {}
-    for attempt in submitted_attempts:
+    for attempt in latest_attempt_rows:
         if attempt.student_profile_id not in latest_attempts:
             latest_attempts[attempt.student_profile_id] = attempt
     attempt_ids = [row.id for row in latest_attempts.values()]
 
-    answer_rows = g.db.query(Answer).filter(Answer.attempt_id.in_(attempt_ids)).all() if attempt_ids else []
+    answer_rows = g.db.query(AttemptAnswer).filter(AttemptAnswer.attempt_id.in_(attempt_ids)).all() if attempt_ids else []
     stats_map = {}
     for row in answer_rows:
-        if row.your is None:
-            continue
         try:
-            option_index = int(row.your)
+            option_index = int(row.choice)
         except (TypeError, ValueError):
             continue
         option_limit = option_limit_map.get(row.question_id, 4)
         if option_index < 0 or option_index >= option_limit:
             continue
+        question = qmap.get(row.question_id)
         item = stats_map.setdefault(
             row.question_id,
             {"answer_count": 0, "correct_count": 0, "option_counts": {}},
         )
         item["answer_count"] += 1
         item["option_counts"][option_index] = int(item["option_counts"].get(option_index, 0)) + 1
-        if int(row.is_correct or 0) == 1:
+        if question and option_index == int(question.answer or 0):
             item["correct_count"] += 1
 
     items = []
-    submitted_total = len(latest_attempts)
+    submitted_total = sum(1 for row in latest_attempts.values() if row.submitted_at)
+    active_total = len(latest_attempts)
     for index, qid in enumerate(qids, start=1):
         question = qmap.get(qid)
         if not question:
@@ -2960,6 +3101,7 @@ def teacher_exam_question_stats(exam_id):
                 "answer_label": chr(65 + int(question.answer or 0)) if int(question.answer or 0) < 26 else str(int(question.answer or 0) + 1),
                 "answer_text": options[int(question.answer or 0)] if int(question.answer or 0) < len(options) else "",
                 "submitted_count": submitted_total,
+                "active_attempt_count": active_total,
                 "answered_count": answer_count,
                 "correct_count": correct_count,
                 "wrong_count": max(answer_count - correct_count, 0),
@@ -2968,7 +3110,7 @@ def teacher_exam_question_stats(exam_id):
             }
         )
 
-    return v1_ok({"exam_id": exam.id, "submitted_total": submitted_total, "items": items})
+    return v1_ok({"exam_id": exam.id, "submitted_total": submitted_total, "active_attempt_count": active_total, "items": items})
 
 
 @bp.route("/api/teacher/exams/<exam_id>/attempts", methods=["GET"])
@@ -3162,6 +3304,78 @@ def client_update_attempt_progress(attempt_id):
     return v1_ok({"attempt_id": attempt.id, "progress_count": progress_count, "question_count": question_count})
 
 
+@bp.route("/api/client/attempts/<attempt_id>/answers", methods=["POST"])
+@login_required(api=True)
+@role_required(["client"])
+def client_save_attempt_answer(attempt_id):
+    profile, error_resp = ensure_client_profile(require_class=True)
+    if error_resp:
+        return v1_error("forbidden", status=403, reason="student profile not assigned to class")
+    attempt = g.db.query(Attempt).filter(Attempt.id == attempt_id).first()
+    if not attempt:
+        return v1_error("attempt not found", status=404, code=40401, reason="attempt not found")
+    if attempt.student_profile_id != profile.id:
+        return v1_error("forbidden", status=403, code=40301, reason="attempt does not belong to current student")
+    if attempt.submitted_at:
+        return v1_error("attempt already submitted", status=409, code=40901, reason="attempt already submitted")
+    exam = load_exam(attempt.exam_id)
+    if not exam:
+        return v1_error("exam not found", status=404, code=40402, reason="exam not found")
+
+    now = datetime.now(timezone.utc)
+    start_at = parse_iso_datetime(exam.start_at)
+    end_at = parse_iso_datetime(exam.end_at)
+    if start_at and now < start_at:
+        return v1_error("forbidden", status=403, code=40301, reason="exam has not started")
+    if end_at and now > end_at:
+        return v1_error("attempt timed out", status=409, code=40902, reason="attempt timed out")
+    if exam.status not in {"published", "active"}:
+        return v1_error("forbidden", status=403, code=40301, reason="exam is not open")
+
+    data = request.get_json(silent=True) or {}
+    question_id = str(data.get("question_id") or "").strip()
+    choice = parse_int(data.get("choice"), None)
+    progress_count = parse_int(data.get("progress_count"), None)
+    duration_sec = parse_int(data.get("duration_sec"), None) if data.get("duration_sec") is not None else None
+    if not question_id:
+        return v1_error("invalid params", status=400, code=40001, reason="question_id is required")
+    if choice is None:
+        return v1_error("invalid params", status=400, code=40001, reason="choice is required")
+    if progress_count is None:
+        return v1_error("invalid params", status=400, code=40001, reason="progress_count is required")
+    if duration_sec is not None and duration_sec < 0:
+        return v1_error("invalid params", status=400, code=40001, reason="duration_sec must be >= 0")
+
+    question_ids, question_map = load_exam_question_bundle(exam.id)
+    question = question_map.get(question_id)
+    if question_id not in question_ids or not question:
+        return v1_error("question not found", status=404, code=40403, reason="question not found in exam")
+    options = json.loads(question.options or "[]")
+    if choice < 0 or choice > 3 or choice >= len(options):
+        return v1_error("invalid params", status=400, code=40001, reason="choice must be an integer index between 0 and 3")
+
+    question_count = len([qid for qid in question_ids if qid in question_map])
+    progress_count = max(0, min(progress_count, question_count))
+    with transactional(g.db):
+        saved_at, normalized_progress, _normalized_duration = save_attempt_answer_row(
+            attempt=attempt,
+            exam=exam,
+            question_id=question_id,
+            choice=choice,
+            progress_count=progress_count,
+            duration_sec=duration_sec,
+        )
+    return v1_ok(
+        {
+            "attempt_id": attempt.id,
+            "question_id": question_id,
+            "choice": int(choice),
+            "progress_count": normalized_progress,
+            "question_count": question_count,
+            "saved_at": saved_at,
+        }
+    )
+
 @bp.route("/api/client/attempts/<attempt_id>/submit", methods=["POST"])
 @login_required(api=True)
 @role_required(["client"])
@@ -3171,98 +3385,26 @@ def client_submit_attempt(attempt_id):
         return v1_error("forbidden", status=403, reason="student profile not assigned to class")
     attempt = g.db.query(Attempt).filter(Attempt.id == attempt_id).first()
     if not attempt:
-        return v1_error("not_found", status=404, reason="attempt not found")
+        return v1_error("attempt not found", status=404, code=40401, reason="attempt not found")
     if attempt.student_profile_id != profile.id:
-        return v1_error("forbidden", status=403, reason="attempt does not belong to current student")
+        return v1_error("forbidden", status=403, code=40301, reason="attempt does not belong to current student")
     if attempt.submitted_at:
-        return v1_error("conflict", status=409, reason="attempt already submitted")
+        return v1_error("attempt already submitted", status=409, code=40901, reason="attempt already submitted")
     exam = load_exam(attempt.exam_id)
     if not exam:
-        return v1_error("not_found", status=404, reason="exam not found")
-    opened, msg = exam_is_open_for_action(exam)
-    if not opened:
-        return v1_error("forbidden", status=403, reason=msg)
+        return v1_error("exam not found", status=404, code=40402, reason="exam not found")
+    if exam.status not in {"published", "active", "ended"}:
+        return v1_error("forbidden", status=403, code=40301, reason="exam is not open")
 
     data = request.get_json(silent=True) or {}
-    answer_mapping = parse_client_answer_mapping(data.get("answers"))
-    duration_sec = parse_int(data.get("duration_sec") if data.get("duration_sec") is not None else data.get("duration"), None)
-    links = g.db.query(ExamQuestion).filter(ExamQuestion.exam_id == exam.id).all()
-    question_ids = [x.question_id for x in links]
-    if not question_ids:
-        return v1_error("invalid_params", status=400, reason="exam has no questions")
-    questions = g.db.query(Question).filter(Question.id.in_(question_ids)).all()
-    qmap = {q.id: q for q in questions}
-    score = 0
-    total = 0
-    submitted_at = utc_now_iso()
-    wrong_training_config = load_wrong_training_config(g.db)
-    mastery_streak = int(wrong_training_config.get("mastery_streak") or WRONG_CLEAR_STREAK)
+    duration_sec = parse_int(data.get("duration_sec"), None) if data.get("duration_sec") is not None else None
+    if duration_sec is not None and duration_sec < 0:
+        return v1_error("invalid params", status=400, code=40001, reason="duration_sec must be >= 0")
 
-    with transactional(g.db):
-        for qid in question_ids:
-            q = qmap.get(qid)
-            if not q:
-                continue
-            total += 1
-            your = answer_mapping.get(qid)
-            your_value = -1 if your is None else int(your)
-            correct = int(q.answer)
-            is_correct = 1 if your_value == correct else 0
-            avg_cost_ms = estimate_avg_cost_ms(duration_sec, len(question_ids))
-            wrong_row = (
-                g.db.query(WrongQuestion)
-                .filter(WrongQuestion.student_profile_id == profile.id, WrongQuestion.question_id == qid)
-                .first()
-            )
-            if is_correct:
-                score += 1
-                if wrong_row:
-                    next_streak = int(wrong_row.correct_streak or 0) + 1
-                    wrong_row.correct_streak = next_streak
-                    wrong_row.last_correct_at = submitted_at
-                    if avg_cost_ms is not None:
-                        history_avg = parse_int(getattr(wrong_row, "avg_cost_ms", None), None)
-                        wrong_row.avg_cost_ms = avg_cost_ms if history_avg is None else int((history_avg + avg_cost_ms) / 2)
-                    if next_streak >= mastery_streak:
-                        wrong_row.is_active = 0
-            else:
-                if wrong_row:
-                    wrong_row.wrong_count = int(wrong_row.wrong_count or 0) + 1
-                    wrong_row.correct_streak = 0
-                    wrong_row.is_active = 1
-                    wrong_row.last_wrong_at = submitted_at
-                    if avg_cost_ms is not None:
-                        history_avg = parse_int(getattr(wrong_row, "avg_cost_ms", None), None)
-                        wrong_row.avg_cost_ms = avg_cost_ms if history_avg is None else int((history_avg + avg_cost_ms) / 2)
-                else:
-                    g.db.add(
-                        WrongQuestion(
-                            student_profile_id=profile.id,
-                            question_id=qid,
-                            wrong_count=1,
-                            correct_streak=0,
-                            is_active=1,
-                            last_wrong_at=submitted_at,
-                            last_correct_at=None,
-                            last_seen_at=None,
-                            avg_cost_ms=avg_cost_ms,
-                        )
-                    )
-            g.db.add(Answer(id=uuid.uuid4().hex, attempt_id=attempt.id, question_id=qid, your=your_value, correct=correct, is_correct=is_correct))
-        attempt.score = score
-        attempt.total = total
-        attempt.progress_count = total
-        attempt.submitted_at = submitted_at
-        attempt.duration_sec = duration_sec
-    return v1_ok(
-        {
-            "attempt_id": attempt.id,
-            "score": score,
-            "total": total,
-            "accuracy": normalized_accuracy(score, total),
-            "submitted_at": attempt.submitted_at,
-        }
-    )
+    payload, submit_error = finalize_attempt_submission(attempt=attempt, exam=exam, profile=profile, duration_sec=duration_sec)
+    if submit_error:
+        return submit_error
+    return v1_ok(payload)
 
 
 @bp.route("/api/teacher/classes/<int:class_id>/scores", methods=["GET"])

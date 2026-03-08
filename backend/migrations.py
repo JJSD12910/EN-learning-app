@@ -3,7 +3,7 @@ import sqlite3
 from .db import DB_FILE
 
 
-LATEST_VERSION = 14
+LATEST_VERSION = 15
 
 
 def _table_exists(cur, table_name: str) -> bool:
@@ -806,6 +806,63 @@ def _migration_13_attempt_progress(cur):
         cur.execute("UPDATE attempts SET progress_count=0 WHERE progress_count IS NULL")
 
 
+def _migration_15_attempt_answers(cur):
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS attempt_answers (
+            id TEXT NOT NULL PRIMARY KEY,
+            attempt_id TEXT NOT NULL,
+            exam_id TEXT NOT NULL,
+            question_id TEXT NOT NULL,
+            choice INTEGER NOT NULL,
+            progress_count INTEGER NOT NULL DEFAULT 0,
+            duration_sec INTEGER,
+            first_answered_at TEXT,
+            last_answered_at TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            UNIQUE(attempt_id, question_id)
+        )
+        """
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_attempt_answers_exam_id ON attempt_answers(exam_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_attempt_answers_attempt_id ON attempt_answers(attempt_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_attempt_answers_question_id ON attempt_answers(question_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_attempt_answers_updated_at ON attempt_answers(updated_at)")
+    if _table_exists(cur, "answers") and _table_exists(cur, "attempts"):
+        cur.execute(
+            """
+            INSERT OR IGNORE INTO attempt_answers (
+                id,
+                attempt_id,
+                exam_id,
+                question_id,
+                choice,
+                progress_count,
+                duration_sec,
+                first_answered_at,
+                last_answered_at,
+                created_at,
+                updated_at
+            )
+            SELECT
+                answers.id,
+                answers.attempt_id,
+                attempts.exam_id,
+                answers.question_id,
+                COALESCE(answers.your, -1),
+                COALESCE(attempts.progress_count, 0),
+                attempts.duration_sec,
+                COALESCE(attempts.submitted_at, attempts.started_at),
+                COALESCE(attempts.submitted_at, attempts.started_at),
+                COALESCE(attempts.started_at, attempts.submitted_at),
+                COALESCE(attempts.submitted_at, attempts.started_at)
+            FROM answers
+            JOIN attempts ON attempts.id = answers.attempt_id
+            """
+        )
+
+
 MIGRATIONS = [
     (1, _migration_1_schema_version),
     (2, _migration_2_questions_category),
@@ -821,6 +878,7 @@ MIGRATIONS = [
     (12, _migration_12_roles_and_teacher_validity),
     (13, _migration_13_attempt_progress),
     (14, _migration_14_wrong_training_config),
+    (15, _migration_15_attempt_answers),
 ]
 
 

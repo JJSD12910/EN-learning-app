@@ -203,6 +203,29 @@ class Answer(Base):
     is_correct = Column(Integer, nullable=False)
 
 
+class AttemptAnswer(Base):
+    __tablename__ = "attempt_answers"
+    __table_args__ = (
+        UniqueConstraint("attempt_id", "question_id", name="uq_attempt_answers_attempt_question"),
+        Index("idx_attempt_answers_exam_id", "exam_id"),
+        Index("idx_attempt_answers_attempt_id", "attempt_id"),
+        Index("idx_attempt_answers_question_id", "question_id"),
+        Index("idx_attempt_answers_updated_at", "updated_at"),
+    )
+
+    id = Column(Text, primary_key=True)
+    attempt_id = Column(Text, nullable=False)
+    exam_id = Column(Text, nullable=False)
+    question_id = Column(Text, nullable=False)
+    choice = Column(Integer, nullable=False)
+    progress_count = Column(Integer, nullable=False, default=0, server_default="0")
+    duration_sec = Column(Integer, nullable=True)
+    first_answered_at = Column(Text, nullable=True)
+    last_answered_at = Column(Text, nullable=True)
+    created_at = Column(Text, nullable=True)
+    updated_at = Column(Text, nullable=True)
+
+
 class WrongQuestion(Base):
     __tablename__ = "wrong_questions"
     __table_args__ = (
