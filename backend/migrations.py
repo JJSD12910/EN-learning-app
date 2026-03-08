@@ -3,7 +3,7 @@ import sqlite3
 from .db import DB_FILE
 
 
-LATEST_VERSION = 11
+LATEST_VERSION = 14
 
 
 def _table_exists(cur, table_name: str) -> bool:
@@ -230,7 +230,7 @@ def _migration_8_wrong_lifecycle_and_practice_target(cur):
 def _migration_9_normalize_target_schema(cur):
     users_cols = _table_columns(cur, "users")
     users_role_col = _col_expr(users_cols, "role", "'admin'")
-    users_role_expr = f"CASE WHEN {users_role_col} IN ('admin','teacher') THEN {users_role_col} ELSE 'admin' END"
+    users_role_expr = f"CASE WHEN {users_role_col} IN ('admin','assistant','teacher') THEN {users_role_col} ELSE 'admin' END"
     users_is_active_col = _col_expr(users_cols, "is_active", "1")
     users_is_active_expr = f"CASE WHEN {users_is_active_col} IS NULL THEN 1 ELSE {users_is_active_col} END"
     _rebuild_table(
@@ -241,15 +241,17 @@ def _migration_9_normalize_target_schema(cur):
             id INTEGER NOT NULL PRIMARY KEY,
             username TEXT NOT NULL UNIQUE,
             password TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('admin','teacher')),
+            role TEXT NOT NULL CHECK(role IN ('admin','assistant','teacher')),
             display_name TEXT,
             is_active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT,
             updated_at TEXT,
+            valid_from TEXT,
+            valid_to TEXT,
             last_login_at TEXT
         )
         """,
-        ["id", "username", "password", "role", "display_name", "is_active", "created_at", "updated_at", "last_login_at"],
+        ["id", "username", "password", "role", "display_name", "is_active", "created_at", "updated_at", "valid_from", "valid_to", "last_login_at"],
         [
             _coalesce_expr(users_cols, "id", "rowid"),
             _coalesce_expr(users_cols, "username", "''"),
@@ -259,6 +261,8 @@ def _migration_9_normalize_target_schema(cur):
             users_is_active_expr,
             _col_expr(users_cols, "created_at", "NULL"),
             _col_expr(users_cols, "updated_at", "NULL"),
+            _col_expr(users_cols, "valid_from", "NULL"),
+            _col_expr(users_cols, "valid_to", "NULL"),
             _col_expr(users_cols, "last_login_at", "NULL"),
         ],
     )
@@ -737,6 +741,71 @@ def _migration_11_student_wrong_training_switch(cur):
         cur.execute("UPDATE student_profiles SET wrong_training_enabled=0 WHERE wrong_training_enabled IS NULL")
 
 
+def _migration_12_roles_and_teacher_validity(cur):
+    users_cols = _table_columns(cur, "users")
+    users_role_col = _col_expr(users_cols, "role", "'admin'")
+    users_role_expr = f"CASE WHEN {users_role_col} IN ('admin','assistant','teacher') THEN {users_role_col} ELSE 'admin' END"
+    users_is_active_col = _col_expr(users_cols, "is_active", "1")
+    users_is_active_expr = f"CASE WHEN {users_is_active_col} IS NULL THEN 1 ELSE {users_is_active_col} END"
+    _rebuild_table(
+        cur,
+        "users",
+        """
+        CREATE TABLE {table} (
+            id INTEGER NOT NULL PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('admin','assistant','teacher')),
+            display_name TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT,
+            updated_at TEXT,
+            valid_from TEXT,
+            valid_to TEXT,
+            last_login_at TEXT
+        )
+        """,
+        ["id", "username", "password", "role", "display_name", "is_active", "created_at", "updated_at", "valid_from", "valid_to", "last_login_at"],
+        [
+            _coalesce_expr(users_cols, "id", "rowid"),
+            _coalesce_expr(users_cols, "username", "''"),
+            _coalesce_expr(users_cols, "password", "''"),
+            users_role_expr,
+            _col_expr(users_cols, "display_name", "NULL"),
+            users_is_active_expr,
+            _col_expr(users_cols, "created_at", "NULL"),
+            _col_expr(users_cols, "updated_at", "NULL"),
+            _col_expr(users_cols, "valid_from", "NULL"),
+            _col_expr(users_cols, "valid_to", "NULL"),
+            _col_expr(users_cols, "last_login_at", "NULL"),
+        ],
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active)")
+
+
+def _migration_14_wrong_training_config(cur):
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT NOT NULL PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT
+        )
+        """
+    )
+    if _table_exists(cur, "wrong_questions") and not _column_exists(cur, "wrong_questions", "last_seen_at"):
+        cur.execute("ALTER TABLE wrong_questions ADD COLUMN last_seen_at TEXT")
+    if _table_exists(cur, "wrong_questions") and not _column_exists(cur, "wrong_questions", "avg_cost_ms"):
+        cur.execute("ALTER TABLE wrong_questions ADD COLUMN avg_cost_ms INTEGER")
+
+def _migration_13_attempt_progress(cur):
+    if _table_exists(cur, "attempts") and not _column_exists(cur, "attempts", "progress_count"):
+        cur.execute("ALTER TABLE attempts ADD COLUMN progress_count INTEGER NOT NULL DEFAULT 0")
+    if _table_exists(cur, "attempts"):
+        cur.execute("UPDATE attempts SET progress_count=0 WHERE progress_count IS NULL")
+
+
 MIGRATIONS = [
     (1, _migration_1_schema_version),
     (2, _migration_2_questions_category),
@@ -749,6 +818,9 @@ MIGRATIONS = [
     (9, _migration_9_normalize_target_schema),
     (10, _migration_10_exam_lifecycle),
     (11, _migration_11_student_wrong_training_switch),
+    (12, _migration_12_roles_and_teacher_validity),
+    (13, _migration_13_attempt_progress),
+    (14, _migration_14_wrong_training_config),
 ]
 
 

@@ -8,10 +8,18 @@ class SchemaVersion(Base):
     version = Column(Integer, primary_key=True)
 
 
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key = Column(Text, primary_key=True)
+    value = Column(Text, nullable=False)
+    updated_at = Column(Text, nullable=True)
+
+
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        CheckConstraint("role IN ('admin','teacher')", name="ck_users_role"),
+        CheckConstraint("role IN ('admin','assistant','teacher')", name="ck_users_role"),
         Index("idx_users_role", "role"),
         Index("idx_users_is_active", "is_active"),
     )
@@ -24,6 +32,8 @@ class User(Base):
     is_active = Column(Integer, nullable=False, default=1, server_default="1")
     created_at = Column(Text, nullable=True)
     updated_at = Column(Text, nullable=True)
+    valid_from = Column(Text, nullable=True)
+    valid_to = Column(Text, nullable=True)
     last_login_at = Column(Text, nullable=True)
 
 
@@ -177,6 +187,7 @@ class Attempt(Base):
     submitted_at = Column(Text, nullable=True)
     score = Column(Integer, nullable=False, default=0, server_default="0")
     total = Column(Integer, nullable=False, default=0, server_default="0")
+    progress_count = Column(Integer, nullable=False, default=0, server_default="0")
     duration_sec = Column(Integer, nullable=True)
 
 
@@ -207,6 +218,8 @@ class WrongQuestion(Base):
     is_active = Column(Integer, nullable=False, default=1)
     last_wrong_at = Column(Text, nullable=True)
     last_correct_at = Column(Text, nullable=True)
+    last_seen_at = Column(Text, nullable=True)
+    avg_cost_ms = Column(Integer, nullable=True)
 
 
 class AuditLog(Base):

@@ -3,123 +3,189 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>教师端 | 测验系统</title>
+  <title>课堂测验中心 | 测验系统</title>
   <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    .cx-live-shell { display:flex; flex-direction:column; gap:12px; }
+    .cx-live-top { display:grid; grid-template-columns:minmax(0,2fr) minmax(280px,1fr); gap:12px; align-items:stretch; }
+    .cx-live-meta { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
+    .cx-live-meta-item { padding:10px 12px; border-radius:14px; background:rgba(6,78,59,0.04); border:1px solid rgba(15,118,110,0.12); }
+    .cx-live-meta-item span { display:block; font-size:12px; color:#5f7a72; margin-bottom:4px; }
+    .cx-live-meta-item strong { display:block; font-size:15px; color:#16352b; }
+    .cx-live-clock { display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; min-height:168px; background:linear-gradient(135deg, rgba(10,132,255,0.1), rgba(22,163,74,0.08)); }
+    .cx-live-clock-label { font-size:13px; color:#547267; letter-spacing:0.08em; }
+    .cx-live-clock-value { margin-top:8px; font-size:clamp(42px,5vw,68px); line-height:1; font-weight:800; color:#0f172a; font-variant-numeric:tabular-nums; }
+    .cx-live-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+    .cx-live-summary .card { min-height:108px; }
+    .cx-live-summary .card h3 { margin-top:8px; font-size:32px; font-variant-numeric:tabular-nums; }
+    .cx-live-refresh-note { display:flex; justify-content:space-between; align-items:center; gap:12px; font-size:13px; color:#5f7a72; }
+    .cx-live-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; }
+    .cx-live-student { border:1px solid rgba(15,23,42,0.08); border-radius:18px; padding:14px; background:#fff; transition:transform 0.18s ease, border-color 0.18s ease; }
+    .cx-live-student:hover { transform:translateY(-1px); }
+    .cx-live-student.is-complete { border-color:rgba(22,163,74,0.28); background:rgba(240,253,244,0.92); }
+    .cx-live-student.is-active { border-color:rgba(14,116,144,0.24); background:rgba(240,249,255,0.92); }
+    .cx-live-student.is-pending { border-color:rgba(220,38,38,0.18); background:rgba(254,242,242,0.94); }
+    .cx-live-student-head { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+    .cx-live-student-name { font-size:16px; font-weight:700; color:#16352b; word-break:break-word; }
+    .cx-live-student-sub { margin-top:2px; font-size:12px; color:#6b7c74; }
+    .cx-live-state { flex-shrink:0; border-radius:999px; padding:4px 9px; font-size:12px; font-weight:700; color:#fff; }
+    .cx-live-state.is-complete { background:#16a34a; }
+    .cx-live-state.is-active { background:#0284c7; }
+    .cx-live-state.is-pending { background:#dc2626; }
+    .cx-live-progress-row { display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-top:14px; margin-bottom:8px; }
+    .cx-live-progress-text { font-size:28px; font-weight:800; color:#0f172a; font-variant-numeric:tabular-nums; }
+    .cx-live-progress-text small { font-size:14px; color:#5f7a72; font-weight:600; margin-left:2px; }
+    .cx-live-progress-percent { font-size:13px; color:#5f7a72; }
+    .cx-live-bar { height:10px; border-radius:999px; overflow:hidden; background:rgba(148,163,184,0.18); }
+    .cx-live-bar > span { display:block; height:100%; border-radius:inherit; transition:width 0.24s ease; }
+    .cx-live-student.is-complete .cx-live-bar > span { background:linear-gradient(90deg, #22c55e, #16a34a); }
+    .cx-live-student.is-active .cx-live-bar > span { background:linear-gradient(90deg, #38bdf8, #0284c7); }
+    .cx-live-student.is-pending .cx-live-bar > span { background:linear-gradient(90deg, #fca5a5, #dc2626); }
+    .cx-live-foot { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:10px; font-size:12px; color:#6b7c74; }
+    .cx-live-empty { padding:28px 18px; border:1px dashed rgba(148,163,184,0.5); border-radius:16px; text-align:center; color:#64748b; background:rgba(248,250,252,0.9); }
+
+    .cx-stats-shell { display:flex; flex-direction:column; gap:12px; }
+    .cx-stats-summary { grid-template-columns:repeat(4,minmax(0,1fr)); }
+    .cx-question-list { display:flex; flex-direction:column; gap:12px; }
+    .cx-question-card { border:1px solid rgba(15,23,42,0.08); border-radius:18px; padding:16px; background:#fff; }
+    .cx-question-card.is-focus { border-color:rgba(245,158,11,0.35); background:rgba(255,251,235,0.92); }
+    .cx-question-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+    .cx-question-seq { display:inline-flex; align-items:center; gap:8px; font-size:14px; font-weight:700; color:#16352b; }
+    .cx-question-badges { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+    .cx-question-badge { display:inline-flex; align-items:center; border-radius:999px; padding:5px 10px; font-size:12px; font-weight:700; background:rgba(14,116,144,0.1); color:#075985; }
+    .cx-question-badge.is-focus { background:rgba(245,158,11,0.16); color:#b45309; }
+    .cx-question-badge.is-correct { background:rgba(22,163,74,0.12); color:#166534; }
+    .cx-question-stem { margin:12px 0 10px; font-size:15px; line-height:1.7; color:#1f2937; }
+    .cx-question-more summary { cursor:pointer; color:#0f766e; font-size:13px; font-weight:600; }
+    .cx-question-more div { margin-top:8px; color:#475569; line-height:1.7; }
+    .cx-question-bars { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:12px; }
+    .cx-question-bar-row { border-radius:14px; padding:10px 12px; background:rgba(248,250,252,0.96); border:1px solid rgba(148,163,184,0.18); }
+    .cx-question-bar-row.is-correct { background:rgba(240,253,244,0.96); border-color:rgba(22,163,74,0.18); }
+    .cx-question-bar-head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px; }
+    .cx-question-option { font-size:14px; font-weight:700; color:#16352b; }
+    .cx-question-option-text { margin-top:6px; font-size:12px; color:#64748b; line-height:1.5; }
+    .cx-question-bar-track { height:10px; border-radius:999px; overflow:hidden; background:rgba(148,163,184,0.18); }
+    .cx-question-bar-track > span { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg, #38bdf8, #0284c7); }
+    .cx-question-bar-row.is-correct .cx-question-bar-track > span { background:linear-gradient(90deg, #4ade80, #16a34a); }
+    .cx-question-foot { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:12px; font-size:13px; color:#64748b; }
+    @media (max-width:1024px) { .cx-live-top { grid-template-columns:1fr; } .cx-live-summary { grid-template-columns:repeat(2,minmax(0,1fr)); } .cx-question-bars { grid-template-columns:1fr; } }
+    @media (max-width:640px) { .cx-live-summary { grid-template-columns:1fr; } .cx-live-refresh-note { flex-direction:column; align-items:flex-start; } }
+  </style>
 </head>
 <body class="cx-app cx-teacher">
   <div class="cx-home-shell">
     <header class="cx-topbar"><div class="cx-topbar-inner"><div class="cx-school-title">测验系统</div><div class="cx-top-actions"><span class="cx-top-chip">用户：<strong id="user-label">-</strong></span><span class="cx-top-chip">角色：<strong id="role-label">-</strong></span><a href="/logout" class="cx-logout-btn">退出登录</a></div></div></header>
     <div class="cx-main-layout">
-      <aside class="cx-sidebar" aria-label="教师导航">
-        <div class="cx-avatar-card"><div class="cx-avatar-circle">TE</div><p class="cx-avatar-name">教师控制台</p></div>
+      <aside class="cx-sidebar" aria-label="课堂导航">
+        <div class="cx-avatar-card"><div class="cx-avatar-circle" id="role-avatar">TE</div><p class="cx-avatar-name" id="role-title">教师课堂台</p></div>
         <nav class="cx-side-menu" id="teacher-menu">
-          <a class="active" href="#" data-panel="panel-classes">班级与名册</a>
-          <a href="#" data-panel="panel-exams">考试管理</a>
-          <a href="#" data-panel="panel-scores">班级成绩</a>
-          <a href="#" data-panel="panel-student">学生详情与回放</a>
-          <a href="#" data-panel="panel-practices">强化练习管理</a>
-          <a href="#" data-panel="panel-analysis">分析与导出</a>
+          <a class="active" href="#" data-panel="panel-classes">我的班级</a>
+          <a href="#" data-panel="panel-exams">课堂测验 / 考试</a>
+          <a href="#" data-panel="panel-progress">实时看板</a>
+          <a href="#" data-panel="panel-stats">成绩查看 / 统计</a>
         </nav>
       </aside>
       <main class="cx-content-area">
         <div class="cx-content-stack">
-          <section class="cx-course-board compact"><h1>教师端一期联调台</h1><p>术语统一：考试、作答、成绩、错题、分析、导出、强化。</p></section>
+          <section class="cx-course-board compact"><h1 id="page-title">教师课堂测验中心</h1><p>教师端保持简洁，只保留班级查看、课堂测验、实时看板和只读成绩统计；助教可在此处理更完整的测验生命周期。</p></section>
 
           <section class="section teacher-panel" id="panel-classes">
-            <h2>班级与名册</h2>
+            <h2>我的班级</h2>
             <div class="row"><button class="btn" id="btn-load-classes">刷新班级</button><label for="class-select">班级</label><select id="class-select"></select><button class="btn secondary" id="btn-load-students">查看名册</button></div>
-            <div class="table-scroll" style="margin-top:10px;"><table class="table" id="classes-table"><thead><tr><th>班级ID</th><th>学校</th><th>年级</th><th>班级</th><th>状态</th><th>学生数</th></tr></thead><tbody></tbody></table></div>
-            <div class="table-scroll" style="margin-top:10px;"><table class="table" id="students-table"><thead><tr><th>学生ID</th><th>学号</th><th>姓名</th><th>性别</th><th>状态</th></tr></thead><tbody></tbody></table></div>
+            <div class="table-scroll" style="margin-top:10px;"><table class="table" id="classes-table"><thead><tr><th>班级ID</th><th>年级</th><th>班级</th><th>状态</th><th>学生数</th></tr></thead><tbody></tbody></table></div>
+            <div class="table-scroll" style="margin-top:10px;"><table class="table" id="students-table"><thead><tr><th>学生ID</th><th>学号</th><th>姓名</th><th>性别</th><th>状态</th><th>学生账号</th></tr></thead><tbody></tbody></table></div>
           </section>
 
           <section class="section teacher-panel" id="panel-exams" style="display:none;">
-            <h2>考试管理</h2>
+            <h2>课堂测验</h2>
             <div class="row">
-              <input id="exam-title" placeholder="考试标题" />
+              <input id="exam-title" placeholder="测验标题" />
               <input id="exam-count" type="number" value="10" min="1" />
               <input id="exam-category" placeholder="分类（可选）" />
               <input id="exam-start-at" type="datetime-local" />
               <input id="exam-end-at" type="datetime-local" />
             </div>
             <div class="row" style="margin-top:8px;">
-              <input id="exam-question-ids" placeholder="固定题目ID（逗号分隔，可选）" />
-              <label><input id="exam-allow-multiple" type="checkbox" /> 允许多次作答</label>
+              <input id="exam-question-ids" data-assistant-only placeholder="固定题目ID（逗号分隔）" />
+              <label data-assistant-only><input id="exam-allow-multiple" type="checkbox" /> 允许多次作答</label>
               <button class="btn" type="button" id="btn-create-exam">创建草稿</button>
             </div>
             <div class="row" style="margin-top:8px;">
               <input id="exam-filter-class" placeholder="班级ID（可空）" />
-              <select id="exam-filter-status">
-                <option value="">默认（不含归档）</option>
-                <option value="draft">草稿</option>
-                <option value="published">已发布</option>
-                <option value="active">进行中</option>
-                <option value="ended">已结束</option>
-                <option value="archived">已归档</option>
-              </select>
+              <select id="exam-filter-status"><option value="">默认（不含归档）</option><option value="draft">草稿</option><option value="published">已发布</option><option value="active">进行中</option><option value="ended">已结束</option><option value="archived">已归档</option></select>
               <input id="exam-filter-keyword" placeholder="关键词（考试ID/标题）" />
-              <button class="btn secondary" type="button" id="btn-load-exams">刷新考试列表</button>
+              <button class="btn secondary" type="button" id="btn-load-exams">刷新测验列表</button>
             </div>
             <div class="table-scroll" style="margin-top:10px;"><table class="table" id="exams-table"><thead><tr><th>考试ID</th><th>标题</th><th>班级</th><th>题量</th><th>状态</th><th>开始时间</th><th>结束时间</th><th>提交数</th><th>操作</th></tr></thead><tbody></tbody></table></div>
             <div class="row" style="margin-top:8px;"><input id="exam-id" placeholder="考试ID" /><button class="btn secondary" type="button" id="btn-load-exam-detail">考试详情</button><button class="btn secondary" type="button" id="btn-load-exam-questions">固定卷题目</button></div>
             <section class="section" style="margin-top:10px;">
-              <h3 style="margin-top:0;">考试详情与生命周期</h3>
-              <div class="row">
-                <span class="pill">当前状态：<strong id="exam-detail-status">-</strong></span>
-                <span class="pill">尝试数：<strong id="exam-detail-attempts">-</strong></span>
-                <span class="pill">提交数：<strong id="exam-detail-submitted">-</strong></span>
-                <span class="pill">均分：<strong id="exam-detail-avg">-</strong></span>
-              </div>
-              <div class="row" style="margin-top:8px;">
-                <input id="exam-detail-title" placeholder="标题" />
-                <input id="exam-detail-class" placeholder="班级ID（仅草稿可改）" />
-                <input id="exam-detail-count" type="number" min="1" placeholder="题量（草稿）" />
-                <input id="exam-detail-category" placeholder="分类（草稿）" />
-              </div>
-              <div class="row" style="margin-top:8px;">
-                <input id="exam-detail-start-at" type="datetime-local" />
-                <input id="exam-detail-end-at" type="datetime-local" />
-                <input id="exam-detail-question-ids" placeholder="固定题目ID（草稿）" />
-                <label><input id="exam-detail-allow-multiple" type="checkbox" /> 允许多次作答</label>
-              </div>
-              <div class="row" style="margin-top:8px;">
-                <button class="btn secondary" type="button" id="btn-exam-update">保存</button>
-                <button class="btn" type="button" id="btn-exam-publish">发布</button>
-                <button class="btn secondary" type="button" id="btn-exam-unpublish">撤回</button>
-                <button class="btn secondary" type="button" id="btn-exam-end">结束</button>
-                <button class="btn secondary" type="button" id="btn-exam-archive">归档</button>
-                <button class="btn danger" type="button" id="btn-exam-delete">删除</button>
-              </div>
+              <h3 style="margin-top:0;">考试详情</h3>
+              <div class="row"><span class="pill">当前状态：<strong id="exam-detail-status">-</strong></span><span class="pill">尝试数：<strong id="exam-detail-attempts">-</strong></span><span class="pill">提交数：<strong id="exam-detail-submitted">-</strong></span><span class="pill">均分：<strong id="exam-detail-avg">-</strong></span></div>
+              <div class="row" style="margin-top:8px;"><input id="exam-detail-title" placeholder="标题" /><input id="exam-detail-class" data-assistant-only placeholder="班级ID（仅草稿可改）" /><input id="exam-detail-count" data-assistant-only type="number" min="1" placeholder="题量（草稿）" /><input id="exam-detail-category" placeholder="分类" /></div>
+              <div class="row" style="margin-top:8px;"><input id="exam-detail-start-at" type="datetime-local" /><input id="exam-detail-end-at" type="datetime-local" /><input id="exam-detail-question-ids" data-assistant-only placeholder="固定题目ID（草稿）" /><label data-assistant-only><input id="exam-detail-allow-multiple" type="checkbox" /> 允许多次作答</label></div>
+              <div class="row" style="margin-top:8px;"><button class="btn secondary" type="button" id="btn-exam-update">保存</button><button class="btn" type="button" id="btn-exam-publish">发布</button><button class="btn secondary" type="button" id="btn-exam-end">结束</button><button class="btn secondary" data-assistant-only type="button" id="btn-exam-unpublish">撤回</button><button class="btn secondary" data-assistant-only type="button" id="btn-exam-archive">归档</button><button class="btn danger" data-assistant-only type="button" id="btn-exam-delete">删除</button></div>
               <div id="exam-action-status" class="status"></div>
             </section>
             <section id="exam-json" class="cx-output-panel cx-smart-output" data-kind="json" data-empty="暂无考试详情数据"></section>
           </section>
 
-          <section class="section teacher-panel" id="panel-scores" style="display:none;">
-            <h2>班级成绩</h2>
-            <div class="row"><input id="scores-class-id" placeholder="班级ID" /><input id="scores-exam-id" placeholder="考试ID" /><button class="btn" id="btn-load-scores">刷新成绩</button></div>
-            <div class="table-scroll" style="margin-top:10px;"><table class="table" id="scores-table"><thead><tr><th>学生ID</th><th>学号</th><th>姓名</th><th>作答ID</th><th>分数</th><th>正确率</th></tr></thead><tbody></tbody></table></div>
+          <section class="section teacher-panel" id="panel-progress" style="display:none;">
+            <h2>实时看板</h2>
+            <div class="row"><input id="progress-class-id" placeholder="班级ID" /><input id="progress-exam-id" placeholder="考试ID" /><button class="btn" id="btn-load-progress">进入看板</button></div>
+            <div class="cx-live-shell" style="margin-top:12px;">
+              <div class="cx-live-top">
+                <section class="section" style="margin:0;">
+                  <div class="pill">本场测验</div>
+                  <h3 id="progress-exam-title" style="margin:10px 0 12px;">请选择课堂测验</h3>
+                  <div class="cx-live-meta">
+                    <div class="cx-live-meta-item"><span>考试ID</span><strong id="progress-meta-exam">-</strong></div>
+                    <div class="cx-live-meta-item"><span>班级</span><strong id="progress-meta-class">-</strong></div>
+                    <div class="cx-live-meta-item"><span>题量</span><strong id="progress-meta-count">-</strong></div>
+                    <div class="cx-live-meta-item"><span>状态</span><strong id="progress-meta-status">-</strong></div>
+                    <div class="cx-live-meta-item"><span>开始时间</span><strong id="progress-meta-start">-</strong></div>
+                    <div class="cx-live-meta-item"><span>结束时间</span><strong id="progress-meta-end">-</strong></div>
+                  </div>
+                </section>
+                <section class="section cx-live-clock" style="margin:0;">
+                  <div class="cx-live-clock-label" id="progress-countdown-label">倒计时</div>
+                  <div class="cx-live-clock-value" id="progress-countdown">--:--</div>
+                  <div class="cx-live-student-sub" id="progress-clock-note" style="margin-top:10px;">打开看板后每 8 秒自动刷新一次</div>
+                </section>
+              </div>
+              <div class="cx-live-summary">
+                <div class="card"><div class="pill">应到学生</div><h3 id="progress-total-students">-</h3><p>班级名册总数</p></div>
+                <div class="card"><div class="pill">已完成</div><h3 id="progress-submitted">-</h3><p>已提交整套作答</p></div>
+                <div class="card"><div class="pill">进行中</div><h3 id="progress-active">-</h3><p>已开始但尚未提交</p></div>
+                <div class="card"><div class="pill">未完成</div><h3 id="progress-unfinished">-</h3><p>便于课堂现场提醒</p></div>
+              </div>
+              <div class="cx-live-refresh-note">
+                <span id="progress-refresh-note">等待载入课堂进度</span>
+                <span id="progress-last">最近刷新：-</span>
+              </div>
+              <div id="progress-grid" class="cx-live-grid">
+                <div class="cx-live-empty">请先从“课堂测验 / 考试”选择一场测验，或手动输入班级ID与考试ID后进入看板。</div>
+              </div>
+            </div>
           </section>
 
-          <section class="section teacher-panel" id="panel-student" style="display:none;">
-            <h2>学生详情 / 作答回放 / 错题本</h2>
-            <div class="row"><input id="student-id" placeholder="学生ID" /><button class="btn" id="btn-student-overview">学生概览</button><button class="btn secondary" id="btn-student-attempts">作答记录</button><button class="btn secondary" id="btn-student-wrongs">错题本</button><button class="btn secondary" id="btn-student-analysis">学生分析</button></div>
-            <div class="row" style="margin-top:8px;"><input id="attempt-id" placeholder="作答ID" /><button class="btn secondary" id="btn-attempt-detail">作答回放</button><input id="practice-count" type="number" value="10" min="1" /><input id="practice-title" placeholder="练习标题（可空）" /><button class="btn secondary" id="btn-practice">生成错题强化</button></div>
-            <section id="student-json" class="cx-output-panel cx-smart-output" data-kind="json" data-empty="暂无学生详情数据"></section>
-          </section>
-
-          <section class="section teacher-panel" id="panel-analysis" style="display:none;">
-            <h2>导出中心</h2>
-            <div class="row"><input id="analysis-class-id" placeholder="班级ID" /><input id="analysis-exam-id" placeholder="考试ID（可空）" /></div>
-            <div class="row" style="margin-top:8px;"><button class="btn secondary" id="btn-export-scores">导出成绩（Excel）</button><button class="btn secondary" id="btn-export-wrongs">导出错题（Excel）</button></div>
-            <div id="download-links" class="stack"></div>
-          </section>
-
-          <section class="section teacher-panel" id="panel-practices" style="display:none;">
-            <h2>个人错题强化管理</h2>
-            <div class="row"><input id="practice-student-id" placeholder="学生ID（可空）" /><input id="practice-status" placeholder="状态（published/archived）" value="published" /><button class="btn" id="btn-load-practices">刷新练习列表</button></div>
-            <div class="table-scroll" style="margin-top:10px;"><table class="table" id="practices-table"><thead><tr><th>练习ID</th><th>标题</th><th>学生</th><th>题量</th><th>状态</th><th>创建时间</th><th>最新作答</th><th>操作</th></tr></thead><tbody></tbody></table></div>
-            <div class="row" style="margin-top:8px;"><input id="effects-student-id" placeholder="学生ID" /><button class="btn secondary" id="btn-load-effects">查看练习效果</button></div>
-            <section id="effects-json" class="cx-output-panel cx-smart-output" data-kind="json" data-empty="暂无练习效果数据"></section>
+          <section class="section teacher-panel" id="panel-stats" style="display:none;">
+            <h2>&#25104;&#32489;&#26597;&#30475;&#19982;&#39064;&#30446;&#32479;&#35745;</h2>
+            <div class="row"><input id="stats-class-id" placeholder="&#29677;&#32423;ID" /><input id="stats-exam-id" placeholder="&#32771;&#35797;ID" /><button class="btn" id="btn-load-stats">&#21047;&#26032;&#39064;&#30446;&#32479;&#35745;</button></div>
+            <div class="cx-stats-shell" style="margin-top:12px;">
+              <div class="cx-live-summary cx-stats-summary">
+                <div class="card"><div class="pill">&#21442;&#19982;&#35762;&#35780;</div><h3 id="stats-submitted-total">-</h3><p>&#24050;&#25552;&#20132;&#30340;&#23398;&#29983;&#20154;&#25968;</p></div>
+                <div class="card"><div class="pill">&#24179;&#22343;&#27491;&#30830;&#29575;</div><h3 id="stats-avg-accuracy">-</h3><p>&#25353;&#39064;&#30446;&#24179;&#22343;&#20540;&#23637;&#31034;</p></div>
+                <div class="card"><div class="pill">&#37325;&#28857;&#35762;&#39064;</div><h3 id="stats-focus-count">-</h3><p>&#24314;&#35758;&#20248;&#20808;&#35762;&#35780;&#30340;&#39064;&#30446;&#25968;</p></div>
+                <div class="card"><div class="pill">&#26368;&#20302;&#27491;&#30830;&#29575;</div><h3 id="stats-hardest">-</h3><p>&#29992;&#20110;&#35838;&#22530;&#21363;&#26102;&#28857;&#39064;</p></div>
+              </div>
+              <div class="cx-live-refresh-note">
+                <span id="stats-note">&#35831;&#20808;&#36873;&#25321;&#32771;&#35797;&#21518;&#26597;&#30475;&#27599;&#39064;&#32479;&#35745;&#12290;</span>
+                <span id="stats-last">&#26368;&#36817;&#21047;&#26032;&#65306;-</span>
+              </div>
+              <div id="stats-question-list" class="cx-question-list">
+                <div class="cx-live-empty">&#35831;&#20808;&#36873;&#25321;&#32771;&#35797;&#21518;&#26597;&#30475;&#27599;&#39064;&#35838;&#22530;&#35762;&#35780;&#32479;&#35745;&#12290;</div>
+              </div>
+            </div>
           </section>
 
           <div id="status" class="status"></div>
@@ -135,491 +201,95 @@
     const studentsBody = document.querySelector('#students-table tbody');
     const examsBody = document.querySelector('#exams-table tbody');
     const scoresBody = document.querySelector('#scores-table tbody');
-    const practicesBody = document.querySelector('#practices-table tbody');
+    const attemptsBody = document.querySelector('#attempts-table tbody');
+    const statsBody = document.querySelector('#stats-table tbody');
     const classSelect = document.getElementById('class-select');
-    const downloadLinks = document.getElementById('download-links');
     const examActionStatusEl = document.getElementById('exam-action-status');
     const examJsonEl = document.getElementById('exam-json');
-    const smartOutput = window.CXSmartOutput || {
-      renderStatus(el, text, ok) {
-        if (!el) return;
-        el.textContent = text || '';
-        el.className = ok === false ? 'status error' : (ok === true ? 'status ok' : 'status');
-      },
-      render(el, data) {
-        if (!el) return;
-        el.textContent = JSON.stringify(data, null, 2);
-      },
-      renderEmpty(el) {
-        if (!el) return;
-        el.textContent = '';
-      }
-    };
+    const attemptJsonEl = document.getElementById('attempt-json');
+    const smartOutput = window.CXSmartOutput || { renderStatus(el, text, ok) { if (!el) return; el.textContent = text || ''; el.className = ok === false ? 'status error' : (ok === true ? 'status ok' : 'status'); }, render(el, data) { if (!el) return; el.textContent = JSON.stringify(data, null, 2); }, renderEmpty(el) { if (!el) return; el.textContent = ''; } };
     let currentExam = null;
-    const dialogConfirm = (message, options = {}) => {
-      if (typeof smartOutput.confirm === 'function') return smartOutput.confirm(message, options);
-      return Promise.resolve(confirm(message));
-    };
+    let currentRole = 'teacher';
+    let progressPollTimer = null;
+    let progressClockTimer = null;
+    let progressBusy = false;
 
     function setStatus(text, ok = true) { smartOutput.renderStatus(statusEl, text, ok); }
     function setExamActionStatus(text, ok = true) { smartOutput.renderStatus(examActionStatusEl, text, ok); }
     function asJson(el, data, title = '结果详情') { smartOutput.render(el, data, { title }); }
+    function isAssistant() { return currentRole === 'assistant'; }
 
-    async function api(url, options = {}) {
-      const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', ...options });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || (typeof body.code === 'number' && body.code !== 0)) throw new Error((body && body.message) || (body && body.error) || `HTTP ${res.status}`);
-      return body && body.data !== undefined ? body.data : body;
-    }
-
-    function switchPanel(panelId) {
-      document.querySelectorAll('.teacher-panel').forEach(p => p.style.display = p.id === panelId ? 'block' : 'none');
-      document.querySelectorAll('#teacher-menu a').forEach(a => a.classList.toggle('active', a.dataset.panel === panelId));
-    }
-
-    async function loadProfile() {
-      const data = await (await fetch('/auth/status', { credentials: 'same-origin' })).json();
-      const userName = data?.user ?? data?.username ?? '-';
-      const roleName = data?.role ?? data?.current_role ?? '-';
-      const authenticated = typeof data?.authenticated === 'boolean' ? data.authenticated : Boolean(data?.user || data?.username);
-      if (!authenticated) return (location.href = '/login');
-      document.getElementById('user-label').textContent = userName;
-      document.getElementById('role-label').textContent = roleName;
-    }
-
-    function bindClick(id, handler) {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.addEventListener('click', handler);
-    }
-
-    async function loadClasses() {
-      const data = await api('/api/teacher/classes?limit=50&offset=0');
-      classesBody.innerHTML = '';
-      classSelect.innerHTML = '';
-      (data.items || []).forEach((row, idx) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${row.class_id}</td><td>${row.school_name || '-'}</td><td>${row.grade || '-'}</td><td>${row.name || '-'}</td><td>${row.status || '-'}</td><td>${row.student_count ?? 0}</td>`;
-        classesBody.appendChild(tr);
-        const opt = document.createElement('option');
-        opt.value = row.class_id; opt.textContent = `${row.class_id} - ${row.name}`; if (idx === 0) opt.selected = true;
-        classSelect.appendChild(opt);
-      });
-      if (classSelect.value) {
-        document.getElementById('scores-class-id').value = classSelect.value;
-        document.getElementById('analysis-class-id').value = classSelect.value;
+    async function api(url, options = {}) { const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', ...options }); const body = await res.json().catch(() => ({})); if (!res.ok || (typeof body.code === 'number' && body.code !== 0)) throw new Error((body?.data?.reason) || body?.message || `HTTP ${res.status}`); return body && body.data !== undefined ? body.data : body; }
+    function normalizePanelFromHash() { const hash = (location.hash || '').replace('#', ''); return hash && document.getElementById(hash) ? hash : 'panel-classes'; }
+    function switchPanel(panelId, { updateHash = true } = {}) { const targetPanel = panelId && document.getElementById(panelId) ? panelId : 'panel-classes'; document.querySelectorAll('.teacher-panel').forEach(p => p.style.display = p.id === targetPanel ? 'block' : 'none'); document.querySelectorAll('#teacher-menu a').forEach(a => a.classList.toggle('active', a.dataset.panel === targetPanel)); handleProgressPanelVisibility(targetPanel); if (updateHash && location.hash !== `#${targetPanel}`) history.replaceState(null, '', `#${targetPanel}`); }
+    window.addEventListener('hashchange', () => switchPanel(normalizePanelFromHash(), { updateHash: false }));
+    async function loadProfile() { const data = await (await fetch('/auth/status', { credentials: 'same-origin' })).json(); if (!data.authenticated) return (location.href = '/login'); if (!['teacher', 'assistant'].includes(data.role || '')) return (location.href = '/'); currentRole = data.role; document.getElementById('user-label').textContent = data.user || '-'; document.getElementById('role-label').textContent = data.role || '-'; if (isAssistant()) { document.getElementById('role-avatar').textContent = 'AS'; document.getElementById('role-title').textContent = '助教课堂中心'; document.getElementById('page-title').textContent = '助教课堂测验中心'; } document.querySelectorAll('[data-assistant-only]').forEach((el) => { el.style.display = isAssistant() ? '' : 'none'; }); }
+    function bindClick(id, handler) { const el = document.getElementById(id); if (el) el.addEventListener('click', handler); }
+    async function loadClasses() { const data = await api('/api/teacher/classes?limit=50&offset=0'); classesBody.innerHTML = ''; classSelect.innerHTML = ''; (data.items || []).forEach((row, idx) => { const tr = document.createElement('tr'); tr.innerHTML = `<td>${row.class_id}</td><td>${row.grade || '-'}</td><td>${row.name || '-'}</td><td>${row.status || '-'}</td><td>${row.student_count ?? 0}</td>`; tr.addEventListener('click', () => { classSelect.value = row.class_id; syncClassInputs(row.class_id); loadStudents().catch((e) => setStatus(e.message, false)); }); classesBody.appendChild(tr); const opt = document.createElement('option'); opt.value = row.class_id; opt.textContent = `${row.class_id} - ${row.name}`; if (idx === 0) opt.selected = true; classSelect.appendChild(opt); }); if (classSelect.value) syncClassInputs(classSelect.value); setStatus('班级加载完成'); }
+    function syncClassInputs(classId) { document.getElementById('exam-filter-class').value = classId || ''; document.getElementById('progress-class-id').value = classId || ''; document.getElementById('stats-class-id').value = classId || ''; }
+    async function loadStudents() { if (!classSelect.value) return; const data = await api(`/api/teacher/classes/${classSelect.value}/students?limit=200&offset=0`); studentsBody.innerHTML = ''; (data.items || []).forEach((row) => { const tr = document.createElement('tr'); tr.innerHTML = `<td>${row.student_id}</td><td>${row.student_no || '-'}</td><td>${row.name || '-'}</td><td>${row.gender || '-'}</td><td>${row.status || '-'}</td><td>${row.client_username || '-'}</td>`; studentsBody.appendChild(tr); }); setStatus('名册加载完成'); }
+    function toIsoFromLocal(localValue) { if (!localValue) return null; const dt = new Date(localValue); return Number.isNaN(dt.getTime()) ? null : dt.toISOString(); }
+    function toLocalFromIso(isoValue) { if (!isoValue) return ''; const dt = new Date(isoValue); if (Number.isNaN(dt.getTime())) return ''; const pad = (v) => String(v).padStart(2, '0'); return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`; }
+    function escapeHtml(value) { return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+    function formatBoardTime(value) { if (!value) return '-'; const dt = new Date(value); return Number.isNaN(dt.getTime()) ? '-' : dt.toLocaleString('zh-CN', { hour12: false }); }
+    function formatClock(totalSeconds) { const safeSeconds = Math.max(0, Number(totalSeconds || 0)); const minutes = Math.floor(safeSeconds / 60); const seconds = safeSeconds % 60; return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`; }
+    function stopProgressPolling() { if (progressPollTimer) { clearInterval(progressPollTimer); progressPollTimer = null; } if (progressClockTimer) { clearInterval(progressClockTimer); progressClockTimer = null; } }
+    function updateProgressCountdown() { const labelEl = document.getElementById('progress-countdown-label'); const valueEl = document.getElementById('progress-countdown'); const noteEl = document.getElementById('progress-clock-note'); if (!valueEl || !labelEl || !noteEl) return; if (!currentExam) { labelEl.textContent = '倒计时'; valueEl.textContent = '--:--'; noteEl.textContent = '打开看板后每 8 秒自动刷新一次'; return; } const now = Date.now(); const startMs = currentExam.start_at ? Date.parse(currentExam.start_at) : NaN; const endMs = currentExam.end_at ? Date.parse(currentExam.end_at) : NaN; if (!Number.isNaN(startMs) && now < startMs) { labelEl.textContent = '距开始'; valueEl.textContent = formatClock(Math.ceil((startMs - now) / 1000)); noteEl.textContent = `开始时间：${formatBoardTime(currentExam.start_at)}`; return; } if (!Number.isNaN(endMs) && now <= endMs) { labelEl.textContent = '距结束'; valueEl.textContent = formatClock(Math.ceil((endMs - now) / 1000)); noteEl.textContent = `结束时间：${formatBoardTime(currentExam.end_at)}`; return; } labelEl.textContent = '当前状态'; valueEl.textContent = getStatusLabel(currentExam); noteEl.textContent = currentExam.end_at ? `结束时间：${formatBoardTime(currentExam.end_at)}` : '当前考试未设置截止时间'; }
+    function startProgressPolling() { stopProgressPolling(); progressClockTimer = setInterval(updateProgressCountdown, 1000); progressPollTimer = setInterval(() => { const examId = (document.getElementById('progress-exam-id').value || '').trim(); if (!examId) return; loadProgress({ silent: true }).catch((e) => setStatus(e.message, false)); }, 8000); updateProgressCountdown(); }
+    function handleProgressPanelVisibility(panelId) { if (panelId !== 'panel-progress') { stopProgressPolling(); return; } startProgressPolling(); const examId = (document.getElementById('progress-exam-id').value || '').trim(); if (examId) loadProgress({ silent: true }).catch((e) => setStatus(e.message, false)); }
+    function parseQuestionIdsInput(raw) { const text = String(raw || '').trim(); if (!text) return null; const items = text.split(',').map(s => s.trim()).filter(Boolean); return items.length ? Array.from(new Set(items)) : null; }
+    function getRuntimeStatus(exam) { const base = (exam.effective_status || exam.status || '').toLowerCase(); return base || 'draft'; }
+    function getStatusLabel(exam) { const raw = (exam.status || '').toLowerCase(); const runtime = getRuntimeStatus(exam); if (raw === 'draft') return '草稿'; if (raw === 'archived') return '已归档'; if (raw === 'ended' || runtime === 'ended') return '已结束'; if (runtime === 'active') return '进行中'; if (raw === 'published') return '已发布'; if (raw === 'active') return '进行中'; return raw || '-'; }
+    function pickStudentAttempt(studentId, attempts) { const sorted = (attempts || []).filter((item) => String(item.student_profile_id) === String(studentId)).sort((a, b) => { const aTime = Date.parse(a.submitted_at || a.started_at || '') || 0; const bTime = Date.parse(b.submitted_at || b.started_at || '') || 0; return bTime - aTime; }); const active = sorted.find((item) => !item.submitted_at); const submitted = sorted.find((item) => !!item.submitted_at); return { active, submitted }; }
+    function buildStudentProgressRows(students, attempts, exam) { const questionCount = Math.max(1, Number(exam?.question_count || 0)); return (students || []).map((student) => { const latest = pickStudentAttempt(student.student_id, attempts); let status = 'pending'; let statusLabel = '未完成'; let progressValue = 0; let latestTime = '-'; let attemptId = ''; if (latest.active) { status = 'active'; statusLabel = '进行中'; progressValue = Math.max(0, Math.min(Number(latest.active.progress_count || 0), questionCount)); latestTime = formatBoardTime(latest.active.started_at); attemptId = latest.active.id || ''; } else if (latest.submitted) { status = 'complete'; statusLabel = '已完成'; progressValue = Math.max(Number(latest.submitted.total || questionCount), questionCount); latestTime = formatBoardTime(latest.submitted.submitted_at); attemptId = latest.submitted.id || ''; } const percent = Math.max(0, Math.min(Math.round((progressValue / questionCount) * 100), 100)); return { studentId: student.student_id, studentNo: student.student_no || '-', name: student.name || student.client_username || `学生${student.student_id}`, status, statusLabel, progressValue: Math.min(progressValue, questionCount), questionCount, percent, latestTime, attemptId }; }).sort((a, b) => { if (a.status === b.status) return String(a.name).localeCompare(String(b.name), 'zh-CN'); const order = { pending: 0, active: 1, complete: 2 }; return (order[a.status] || 0) - (order[b.status] || 0); }); }
+    function renderProgressOverview(exam, students, attempts) { const rows = buildStudentProgressRows(students, attempts, exam); const total = rows.length; const completed = rows.filter((item) => item.status === 'complete').length; const active = rows.filter((item) => item.status === 'active').length; const unfinished = total - completed; document.getElementById('progress-exam-title').textContent = exam?.title || '未命名测验'; document.getElementById('progress-meta-exam').textContent = exam?.exam_id || '-'; document.getElementById('progress-meta-class').textContent = exam?.class_name || exam?.class_id || '-'; document.getElementById('progress-meta-count').textContent = exam?.question_count || 0; document.getElementById('progress-meta-status').textContent = getStatusLabel(exam || {}); document.getElementById('progress-meta-start').textContent = formatBoardTime(exam?.start_at); document.getElementById('progress-meta-end').textContent = formatBoardTime(exam?.end_at); document.getElementById('progress-total-students').textContent = total; document.getElementById('progress-submitted').textContent = completed; document.getElementById('progress-active').textContent = active; document.getElementById('progress-unfinished').textContent = unfinished; document.getElementById('progress-last').textContent = `最近刷新：${formatBoardTime(new Date().toISOString())}`; document.getElementById('progress-refresh-note').textContent = rows.length ? '红色优先关注未开始或尚未作答完成的学生，蓝色表示正在作答。' : '当前班级还没有可展示的学生进度。'; const grid = document.getElementById('progress-grid'); if (!rows.length) { grid.innerHTML = '<div class="cx-live-empty">当前班级暂无学生，无法生成实时进度总览。</div>'; updateProgressCountdown(); return; } grid.innerHTML = rows.map((row) => `<article class="cx-live-student is-${row.status}" data-student-id="${escapeHtml(row.studentId)}" data-attempt-id="${escapeHtml(row.attemptId)}"><div class="cx-live-student-head"><div><div class="cx-live-student-name">${escapeHtml(row.name)}</div><div class="cx-live-student-sub">学号 ${escapeHtml(row.studentNo)}</div></div><span class="cx-live-state is-${row.status}">${escapeHtml(row.statusLabel)}</span></div><div class="cx-live-progress-row"><div class="cx-live-progress-text">${row.progressValue}<small>/${row.questionCount}</small></div><div class="cx-live-progress-percent">${row.percent}%</div></div><div class="cx-live-bar"><span style="width:${row.percent}%;"></span></div><div class="cx-live-foot"><span>最近动作：${escapeHtml(row.latestTime)}</span><span>${row.attemptId ? `作答 ${escapeHtml(row.attemptId.slice(0, 8))}` : '尚未开始'}</span></div></article>`).join(''); updateProgressCountdown(); }
+    function formatPercent(value) { return `${Math.round(Number(value || 0) * 100)}%`; }
+    function renderQuestionStats(payload) {
+      const items = payload?.items || [];
+      const submittedTotal = Number(payload?.submitted_total || 0);
+      const avgAccuracy = items.length ? items.reduce((sum, item) => sum + Number(item.accuracy || 0), 0) / items.length : 0;
+      const focusItems = items.slice().sort((a, b) => Number(a.accuracy || 0) - Number(b.accuracy || 0) || Number(b.wrong_count || 0) - Number(a.wrong_count || 0)).filter((item, index) => index < 3 || Number(item.accuracy || 0) < 0.6);
+      const focusIds = new Set(focusItems.map((item) => item.question_id));
+      const hardest = focusItems[0] || items[0] || null;
+      document.getElementById('stats-submitted-total').textContent = submittedTotal;
+      document.getElementById('stats-avg-accuracy').textContent = formatPercent(avgAccuracy);
+      document.getElementById('stats-focus-count').textContent = focusItems.length;
+      document.getElementById('stats-hardest').textContent = hardest ? `第${hardest.sequence}题 ${formatPercent(hardest.accuracy)}` : '-';
+      document.getElementById('stats-note').textContent = items.length ? '柱状图展示每个选项的人数分布，建议优先讲评正确率最低的题。' : '当前考试还没有可用于讲评的提交数据。';
+      document.getElementById('stats-last').textContent = `最近刷新：${formatBoardTime(new Date().toISOString())}`;
+      const listEl = document.getElementById('stats-question-list');
+      if (!items.length) {
+        listEl.innerHTML = '<div class="cx-live-empty">当前考试暂无已提交作答，暂时无法生成每题讲评统计。</div>';
+        return;
       }
-      setStatus('班级加载完成');
+      listEl.innerHTML = items.map((item) => {
+        const isFocus = focusIds.has(item.question_id);
+        const stem = String(item.stem || '-');
+        const shortStem = stem.length > 96 ? `${stem.slice(0, 96)}...` : stem;
+        const optionRows = (item.options || []).map((option) => {
+          const base = Math.max(submittedTotal, Number(item.answered_count || 0), 1);
+          const width = option.count > 0 ? Math.max((Number(option.count || 0) / base) * 100, 6) : 0;
+          return `<div class="cx-question-bar-row ${option.is_correct ? 'is-correct' : ''}"><div class="cx-question-bar-head"><span class="cx-question-option">${escapeHtml(option.label)}${option.is_correct ? ' ? 正确答案' : ''}</span><span>${option.count} 人</span></div><div class="cx-question-bar-track"><span style="width:${width}%;"></span></div><div class="cx-question-option-text">${escapeHtml(option.text || '-')}</div></div>`;
+        }).join('');
+        const details = stem.length > 96 ? `<details class="cx-question-more"><summary>展开完整题干</summary><div>${escapeHtml(stem)}</div></details>` : '';
+        return `<article class="cx-question-card ${isFocus ? 'is-focus' : ''}"><div class="cx-question-head"><div><div class="cx-question-seq">第 ${item.sequence} 题</div><div class="cx-question-stem">${escapeHtml(shortStem)}</div>${details}</div><div class="cx-question-badges"><span class="cx-question-badge is-correct">正确答案 ${escapeHtml(item.answer_label || '-')}</span><span class="cx-question-badge">正确率 ${formatPercent(item.accuracy)}</span>${isFocus ? '<span class="cx-question-badge is-focus">重点讲评</span>' : ''}</div></div><div class="cx-question-bars">${optionRows}</div><div class="cx-question-foot"><span>答题人数：${Number(item.answered_count || 0)} / ${submittedTotal}</span><span>答对 ${Number(item.correct_count || 0)} 人，答错 ${Number(item.wrong_count || 0)} 人</span></div></article>`;
+      }).join('');
     }
-
-    async function loadStudents() {
-      if (!classSelect.value) return;
-      const data = await api(`/api/teacher/classes/${classSelect.value}/students?limit=200&offset=0`);
-      studentsBody.innerHTML = '';
-      (data.items || []).forEach((row) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${row.student_id}</td><td>${row.student_no || '-'}</td><td>${row.name || '-'}</td><td>${row.gender || '-'}</td><td>${row.status || '-'}</td>`;
-        tr.addEventListener('click', () => {
-          document.getElementById('student-id').value = row.student_id;
-          document.getElementById('practice-student-id').value = row.student_id;
-          document.getElementById('effects-student-id').value = row.student_id;
-          switchPanel('panel-student');
-        });
-        studentsBody.appendChild(tr);
-      });
-      setStatus('名册加载完成');
-    }
-
-    function toIsoFromLocal(localValue) {
-      if (!localValue) return null;
-      const dt = new Date(localValue);
-      return Number.isNaN(dt.getTime()) ? null : dt.toISOString();
-    }
-
-    function toLocalFromIso(isoValue) {
-      if (!isoValue) return '';
-      const dt = new Date(isoValue);
-      if (Number.isNaN(dt.getTime())) return '';
-      const pad = (v) => String(v).padStart(2, '0');
-      return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-    }
-
-    function parseQuestionIdsInput(raw) {
-      const text = String(raw || '').trim();
-      if (!text) return null;
-      const items = text.split(',').map(s => s.trim()).filter(Boolean);
-      return items.length ? Array.from(new Set(items)) : null;
-    }
-
-    function getRuntimeStatus(exam) {
-      const base = (exam.effective_status || exam.status || '').toLowerCase();
-      return base || 'draft';
-    }
-
-    function getStatusLabel(exam) {
-      const raw = (exam.status || '').toLowerCase();
-      const runtime = getRuntimeStatus(exam);
-      if (raw === 'draft') return '草稿';
-      if (raw === 'archived') return '已归档';
-      if (raw === 'ended' || runtime === 'ended') return '已结束';
-      if (runtime === 'active') return '进行中';
-      if (raw === 'published') return '已发布';
-      if (raw === 'active') return '进行中';
-      return raw || '-';
-    }
-
-    function getAvailableActions(exam) {
-      const runtime = getRuntimeStatus(exam);
-      const attemptsTotal = Number(exam?.stats?.attempts_total || 0);
-      const submittedTotal = Number(exam?.stats?.submitted_total || 0);
-      const hasActivity = attemptsTotal > 0 || submittedTotal > 0;
-      return {
-        canUpdate: !['ended', 'archived'].includes(exam.status),
-        canPublish: exam.status === 'draft',
-        canUnpublish: exam.status === 'published' && runtime === 'published' && !hasActivity,
-        canEnd: exam.status === 'active' || exam.status === 'published' || runtime === 'active',
-        canArchive: ['draft', 'published', 'active', 'ended'].includes(exam.status),
-        canDelete: exam.status === 'draft' && !hasActivity,
-      };
-    }
-
-    const ExamService = {
-      async request(url, options = {}) {
-        const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', ...options });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok || (typeof body.code === 'number' && body.code !== 0)) {
-          const err = new Error(this.translateError(body, res.status));
-          err.httpStatus = res.status;
-          err.codeName = body?.message || '';
-          err.reason = body?.data?.reason || '';
-          err.payload = body?.data || {};
-          throw err;
-        }
-        return body && body.data !== undefined ? body.data : body;
-      },
-      translateError(body, httpStatus) {
-        const codeName = body?.message || '';
-        const reason = body?.data?.reason || '';
-        const map = {
-          '400_INVALID_STATE': reason || '当前考试状态不允许该操作',
-          '409_HAS_SUBMISSIONS': '已有学生开始/提交，无法撤回或删除，请改为归档',
-          '403_FORBIDDEN': '你没有权限操作该考试',
-          '404_NOT_FOUND': '考试不存在或已被移除',
-          '422_TIME_INVALID': reason || '开始/结束时间不合法',
-        };
-        if (map[codeName]) return map[codeName];
-        if (codeName === 'conflict' && /attempt|submit|submission|already/.test(reason)) return '已有学生作答，当前操作被拒绝';
-        if (codeName === 'forbidden') return '你没有权限操作该考试';
-        if (codeName === 'not_found') return '考试不存在或无访问权限';
-        if (codeName === 'invalid_params' && /start_at|end_at/.test(reason)) return '开始/结束时间格式错误';
-        return reason || codeName || `HTTP ${httpStatus}`;
-      },
-      async list(params = {}) {
-        const q = new URLSearchParams({ limit: String(params.limit || 50), offset: String(params.offset || 0) });
-        if (params.class_id) q.set('class_id', String(params.class_id));
-        if (params.status) q.set('status', String(params.status));
-        if (params.keyword) q.set('keyword', String(params.keyword));
-        return this.request('/api/teacher/exams?' + q.toString());
-      },
-      async get(examId) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}`); },
-      async getQuestions(examId, { includeAnswer = false, includeAnalysis = false } = {}) {
-        const q = new URLSearchParams({ include_answer: includeAnswer ? 'true' : 'false', include_analysis: includeAnalysis ? 'true' : 'false' });
-        return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}/questions?` + q.toString());
-      },
-      async createDraft(payload) { return this.request('/api/teacher/exams', { method: 'POST', body: JSON.stringify(payload) }); },
-      async update(examId, payload) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}`, { method: 'PATCH', body: JSON.stringify(payload) }); },
-      async publish(examId) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}/publish`, { method: 'POST', body: '{}' }); },
-      async unpublish(examId) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}/unpublish`, { method: 'POST', body: '{}' }); },
-      async end(examId) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}/end`, { method: 'POST', body: '{}' }); },
-      async archive(examId) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}/archive`, { method: 'POST', body: '{}' }); },
-      async remove(examId) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}`, { method: 'DELETE' }); },
-    };
-
-    function applyExamDetailState(exam) {
-      const actions = getAvailableActions(exam);
-      document.getElementById('btn-exam-update').disabled = !actions.canUpdate;
-      document.getElementById('btn-exam-publish').disabled = !actions.canPublish;
-      document.getElementById('btn-exam-unpublish').disabled = !actions.canUnpublish;
-      document.getElementById('btn-exam-end').disabled = !actions.canEnd;
-      document.getElementById('btn-exam-archive').disabled = !actions.canArchive;
-      document.getElementById('btn-exam-delete').disabled = !actions.canDelete;
-
-      const draftOnlyDisabled = exam.status !== 'draft';
-      document.getElementById('exam-detail-class').disabled = draftOnlyDisabled;
-      document.getElementById('exam-detail-count').disabled = draftOnlyDisabled;
-      document.getElementById('exam-detail-category').disabled = draftOnlyDisabled;
-      document.getElementById('exam-detail-question-ids').disabled = draftOnlyDisabled;
-    }
-
-    async function fillExamDetailQuestions(examId) {
-      try {
-        const payload = await ExamService.getQuestions(examId, { includeAnswer: false, includeAnalysis: false });
-        const ids = (payload.items || []).map(i => i.question_id).filter(Boolean);
-        document.getElementById('exam-detail-question-ids').value = ids.join(',');
-      } catch (_) {
-        document.getElementById('exam-detail-question-ids').value = '';
-      }
-    }
-
-    async function createExam() {
-      const classId = document.getElementById('exam-filter-class').value.trim() || classSelect.value;
-      if (!classId) throw new Error('请先选择班级');
-      const payload = {
-        class_id: Number(classId),
-        title: document.getElementById('exam-title').value.trim() || undefined,
-        question_count: Number(document.getElementById('exam-count').value || 10),
-        category: document.getElementById('exam-category').value.trim() || null,
-        start_at: toIsoFromLocal(document.getElementById('exam-start-at').value),
-        end_at: toIsoFromLocal(document.getElementById('exam-end-at').value),
-        allow_multiple_attempts: document.getElementById('exam-allow-multiple').checked,
-      };
-      const qids = parseQuestionIdsInput(document.getElementById('exam-question-ids').value);
-      if (qids) payload.question_ids = qids;
-      const data = await ExamService.createDraft(payload);
-      document.getElementById('exam-id').value = data.exam_id;
-      document.getElementById('scores-exam-id').value = data.exam_id;
-      document.getElementById('analysis-exam-id').value = data.exam_id;
-      setExamActionStatus('草稿创建成功', true);
-      setStatus('草稿创建成功');
-      await loadExams();
-      await loadExamDetail(data.exam_id);
-    }
-
-    function createActionButton(text, className, onClick) {
-      const btn = document.createElement('button');
-      btn.className = className;
-      btn.type = 'button';
-      btn.textContent = text;
-      btn.style.marginRight = '6px';
-      btn.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
-      return btn;
-    }
-
-    async function runExamAction(action, exam) {
-      const target = exam || currentExam;
-      if (!target?.exam_id) return;
-      const id = target.exam_id;
-      const confirmTextMap = {
-        unpublish: '确认撤回发布？仅在无人开始/提交时可成功。',
-        end: '确认结束考试？结束后学生将无法继续提交。',
-        archive: '确认归档该考试？归档后默认不在列表展示。',
-        delete: '确认软删除该考试？仅草稿且无人作答时允许。',
-      };
-      if (confirmTextMap[action] && !(await dialogConfirm(confirmTextMap[action], { title: '请确认操作' }))) return;
-      setExamActionStatus('正在执行操作...', true);
-      let data = null;
-      if (action === 'publish') data = await ExamService.publish(id);
-      if (action === 'unpublish') data = await ExamService.unpublish(id);
-      if (action === 'end') data = await ExamService.end(id);
-      if (action === 'archive') data = await ExamService.archive(id);
-      if (action === 'delete') data = await ExamService.remove(id);
-      const successTextMap = {
-        publish: '发布成功',
-        unpublish: '撤回成功',
-        end: '考试已结束，学生将无法继续提交',
-        archive: '归档成功',
-        delete: '删除成功（软删除）',
-      };
-      setExamActionStatus(successTextMap[action] || '操作成功', true);
-      asJson(examJsonEl, data || {}, '考试操作结果');
-      await loadExams();
-      await loadExamDetail(id);
-    }
-
-    async function loadExams() {
-      const classId = document.getElementById('exam-filter-class').value.trim() || classSelect.value || '';
-      const status = document.getElementById('exam-filter-status').value.trim();
-      const keyword = document.getElementById('exam-filter-keyword').value.trim();
-      const data = await ExamService.list({ class_id: classId || undefined, status: status || undefined, keyword: keyword || undefined, limit: 50, offset: 0 });
-      examsBody.innerHTML = '';
-      (data.items || []).forEach((row) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${row.exam_id}</td><td>${row.title || '-'}</td><td>${row.class_name || row.class_id || '-'}</td><td>${row.question_count || 0}</td><td>${getStatusLabel(row)}</td><td>${row.start_at || '-'}</td><td>${row.end_at || '-'}</td><td>${row?.stats?.submitted_total ?? 0}</td><td></td>`;
-        const actionsCell = tr.querySelector('td:last-child');
-        const actions = getAvailableActions(row);
-        if (actions.canPublish) actionsCell.appendChild(createActionButton('发布', 'btn', () => runExamAction('publish', row).catch(e => setExamActionStatus(e.message, false))));
-        if (actions.canUnpublish) actionsCell.appendChild(createActionButton('撤回', 'btn secondary', () => runExamAction('unpublish', row).catch(e => setExamActionStatus(e.message, false))));
-        if (actions.canEnd) actionsCell.appendChild(createActionButton('结束', 'btn secondary', () => runExamAction('end', row).catch(e => setExamActionStatus(e.message, false))));
-        if (actions.canArchive) actionsCell.appendChild(createActionButton('归档', 'btn secondary', () => runExamAction('archive', row).catch(e => setExamActionStatus(e.message, false))));
-        if (actions.canDelete) actionsCell.appendChild(createActionButton('删除', 'btn danger', () => runExamAction('delete', row).catch(e => setExamActionStatus(e.message, false))));
-        if (!actionsCell.childElementCount) actionsCell.textContent = '-';
-        tr.addEventListener('click', async () => {
-          document.getElementById('exam-id').value = row.exam_id;
-          document.getElementById('scores-exam-id').value = row.exam_id;
-          document.getElementById('analysis-exam-id').value = row.exam_id;
-          await loadExamDetail(row.exam_id);
-        });
-        examsBody.appendChild(tr);
-      });
-      setStatus('考试列表加载完成');
-    }
-
-    async function loadExamDetail(examIdOverride = '') {
-      const id = (examIdOverride || document.getElementById('exam-id').value || '').trim();
-      if (!id) return;
-      const exam = await ExamService.get(id);
-      currentExam = exam;
-      document.getElementById('exam-id').value = exam.exam_id;
-      document.getElementById('exam-detail-title').value = exam.title || '';
-      document.getElementById('exam-detail-class').value = exam.class_id ?? '';
-      document.getElementById('exam-detail-count').value = exam.question_count ?? '';
-      document.getElementById('exam-detail-category').value = exam.category || '';
-      document.getElementById('exam-detail-start-at').value = toLocalFromIso(exam.start_at);
-      document.getElementById('exam-detail-end-at').value = toLocalFromIso(exam.end_at);
-      document.getElementById('exam-detail-allow-multiple').checked = !!exam.allow_multiple_attempts;
-      document.getElementById('exam-detail-status').textContent = getStatusLabel(exam);
-      document.getElementById('exam-detail-attempts').textContent = exam?.stats?.attempts_total ?? 0;
-      document.getElementById('exam-detail-submitted').textContent = exam?.stats?.submitted_total ?? 0;
-      document.getElementById('exam-detail-avg').textContent = exam?.stats?.avg_score ?? 0;
-      await fillExamDetailQuestions(id);
-      applyExamDetailState(exam);
-      asJson(examJsonEl, exam, '考试详情');
-    }
-
-    async function updateExamFromDetail() {
-      if (!currentExam?.exam_id) throw new Error('请先加载考试详情');
-      const payload = {
-        title: document.getElementById('exam-detail-title').value.trim(),
-        start_at: toIsoFromLocal(document.getElementById('exam-detail-start-at').value),
-        end_at: toIsoFromLocal(document.getElementById('exam-detail-end-at').value),
-        allow_multiple_attempts: document.getElementById('exam-detail-allow-multiple').checked,
-      };
-      if (currentExam.status === 'draft') {
-        payload.class_id = Number(document.getElementById('exam-detail-class').value || currentExam.class_id || 0);
-        payload.question_count = Number(document.getElementById('exam-detail-count').value || currentExam.question_count || 0);
-        payload.category = document.getElementById('exam-detail-category').value.trim() || null;
-        const qids = parseQuestionIdsInput(document.getElementById('exam-detail-question-ids').value);
-        if (qids) payload.question_ids = qids;
-      }
-      const data = await ExamService.update(currentExam.exam_id, payload);
-      setExamActionStatus('考试信息已保存', true);
-      asJson(examJsonEl, data, '保存结果');
-      await loadExams();
-      await loadExamDetail(currentExam.exam_id);
-    }
-
-    async function publishFromDetail() {
-      if (!currentExam?.exam_id) throw new Error('请先加载考试详情');
-      if (currentExam.status === 'draft') {
-        await updateExamFromDetail();
-      }
-      await runExamAction('publish');
-    }
-
-    async function loadExamQuestions() {
-      const id = document.getElementById('exam-id').value.trim();
-      if (!id) return;
-      asJson(examJsonEl, await ExamService.getQuestions(id, { includeAnswer: true, includeAnalysis: true }), '固定卷题目详情');
-    }
-
-    async function loadScores() {
-      const classId = document.getElementById('scores-class-id').value.trim();
-      const examId = document.getElementById('scores-exam-id').value.trim();
-      if (!classId || !examId) return;
-      const data = await api(`/api/teacher/classes/${classId}/scores?exam_id=${encodeURIComponent(examId)}&limit=100&offset=0`);
-      scoresBody.innerHTML = '';
-      (data.items || []).forEach((row) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${row.student_id}</td><td>${row.student_no || '-'}</td><td>${row.name || '-'}</td><td>${row.attempt_id || '-'}</td><td>${row.score ?? '-'}/${row.total ?? '-'}</td><td>${row.accuracy ?? '-'}</td>`;
-        tr.addEventListener('click', () => {
-          document.getElementById('student-id').value = row.student_id;
-          document.getElementById('practice-student-id').value = row.student_id;
-          document.getElementById('effects-student-id').value = row.student_id;
-          if (row.attempt_id) document.getElementById('attempt-id').value = row.attempt_id;
-          switchPanel('panel-student');
-        });
-        scoresBody.appendChild(tr);
-      });
-      setStatus('成绩加载完成');
-    }
-
-    async function loadStudentOverview() { const id = document.getElementById('student-id').value.trim(); if (!id) return; asJson(document.getElementById('student-json'), await api(`/api/teacher/students/${id}/overview?range=30d`), '学生概览'); }
-    async function loadStudentAttempts() { const id = document.getElementById('student-id').value.trim(); if (!id) return; const data = await api(`/api/teacher/students/${id}/attempts?limit=30&offset=0`); asJson(document.getElementById('student-json'), data, '学生作答记录'); if (data.items?.[0]?.attempt_id) document.getElementById('attempt-id').value = data.items[0].attempt_id; }
-    async function loadStudentWrongs() { const id = document.getElementById('student-id').value.trim(); if (!id) return; asJson(document.getElementById('student-json'), await api(`/api/teacher/students/${id}/wrongs?limit=50&offset=0`), '学生错题本'); }
-    async function loadStudentAnalysis() { const id = document.getElementById('student-id').value.trim(); if (!id) return; asJson(document.getElementById('student-json'), await api(`/api/teacher/students/${id}/analysis?range=30d`), '学生分析'); }
-    async function loadAttemptDetail() { const id = document.getElementById('attempt-id').value.trim(); if (!id) return; asJson(document.getElementById('student-json'), await api(`/api/teacher/attempts/${id}?include_analysis=true`), '作答回放详情'); }
-
-    async function createPractice() {
-      const studentId = document.getElementById('student-id').value.trim();
-      if (!studentId) return;
-      const title = document.getElementById('practice-title').value.trim();
-      const payload = { count: Number(document.getElementById('practice-count').value || 10), strategy: 'most_wrong_first' };
-      if (title) payload.title = title;
-      const data = await api(`/api/teacher/students/${studentId}/wrongs/practice`, { method: 'POST', body: JSON.stringify(payload) });
-      asJson(document.getElementById('student-json'), data, '强化练习生成结果');
-      setStatus('错题强化已生成');
-      document.getElementById('practice-student-id').value = studentId;
-      document.getElementById('effects-student-id').value = studentId;
-      await loadPractices();
-    }
-
-    async function loadPractices() {
-      const studentId = document.getElementById('practice-student-id').value.trim();
-      const status = document.getElementById('practice-status').value.trim();
-      const q = new URLSearchParams({ limit: '50', offset: '0' });
-      if (studentId) q.set('student_id', studentId);
-      if (status) q.set('status', status);
-      const data = await api('/api/teacher/practices?' + q.toString());
-      practicesBody.innerHTML = '';
-      (data.items || []).forEach((row) => {
-        const tr = document.createElement('tr');
-        const latest = row.latest_attempt ? `${row.latest_attempt.score}/${row.latest_attempt.total} ${row.latest_attempt.submitted_at || ''}` : '-';
-        tr.innerHTML = `<td>${row.practice_exam_id}</td><td>${row.title || '-'}</td><td>${row.student_name || '-'} (${row.student_id || '-'})</td><td>${row.selected_count ?? '-'}</td><td>${row.status || '-'}</td><td>${row.created_at || '-'}</td><td>${latest}</td><td></td>`;
-        const opTd = tr.querySelector('td:last-child');
-        if (row.status !== 'archived') {
-          const btn = document.createElement('button');
-          btn.className = 'btn secondary';
-          btn.textContent = '归档';
-          btn.addEventListener('click', async () => {
-            await api(`/api/teacher/practices/${encodeURIComponent(row.practice_exam_id)}/archive`, { method: 'POST', body: JSON.stringify({}) });
-            await loadPractices();
-          });
-          opTd.appendChild(btn);
-        } else {
-          opTd.textContent = '-';
-        }
-        tr.addEventListener('click', () => {
-          if (row.student_id) {
-            document.getElementById('effects-student-id').value = row.student_id;
-          }
-        });
-        practicesBody.appendChild(tr);
-      });
-      setStatus('练习列表加载完成');
-    }
-
-    async function loadPracticeEffects() {
-      const studentId = document.getElementById('effects-student-id').value.trim();
-      if (!studentId) return;
-      const data = await api(`/api/teacher/students/${studentId}/practice_effects?limit=50&offset=0`);
-      asJson(document.getElementById('effects-json'), data, '强化练习效果');
-      setStatus('练习效果加载完成');
-    }
-
-    async function exportScores() {
-      const classId = Number(document.getElementById('analysis-class-id').value || 0);
-      const examId = document.getElementById('analysis-exam-id').value.trim();
-      const data = await api('/api/teacher/exports/scores', { method: 'POST', body: JSON.stringify(examId ? { class_id: classId, exam_id: examId } : { class_id: classId }) });
-      const box = document.createElement('div'); box.className = 'card'; box.innerHTML = `<div class="pill">${data.filename}</div><a href="${data.download_url}" target="_blank">下载</a>`; downloadLinks.prepend(box);
-    }
-    async function exportWrongs() {
-      const studentId = Number(document.getElementById('student-id').value || 0);
-      const classId = Number(document.getElementById('analysis-class-id').value || 0);
-      const examId = document.getElementById('analysis-exam-id').value.trim();
-      const payload = studentId ? { student_id: studentId } : { class_id: classId, exam_id: examId || undefined };
-      const data = await api('/api/teacher/exports/wrongs', { method: 'POST', body: JSON.stringify(payload) });
-      const box = document.createElement('div'); box.className = 'card'; box.innerHTML = `<div class="pill">${data.filename}</div><a href="${data.download_url}" target="_blank">下载</a>`; downloadLinks.prepend(box);
-    }
-
-    const teacherMenu = document.getElementById('teacher-menu');
-    if (teacherMenu) {
-      teacherMenu.addEventListener('click', (e) => {
-        const a = e.target.closest('a[data-panel]');
-        if (!a) return;
-        e.preventDefault();
-        switchPanel(a.dataset.panel);
-      });
-    }
+    function getAvailableActions(exam) { const runtime = getRuntimeStatus(exam); const attemptsTotal = Number(exam?.stats?.attempts_total || 0); const submittedTotal = Number(exam?.stats?.submitted_total || 0); const hasActivity = attemptsTotal > 0 || submittedTotal > 0; return { canUpdate: !['ended', 'archived'].includes(exam.status), canPublish: exam.status === 'draft', canUnpublish: isAssistant() && exam.status === 'published' && runtime === 'published' && !hasActivity, canEnd: exam.status === 'active' || exam.status === 'published' || runtime === 'active', canArchive: isAssistant() && ['draft', 'published', 'active', 'ended'].includes(exam.status), canDelete: isAssistant() && exam.status === 'draft' && !hasActivity }; }
+    const ExamService = { async request(url, options = {}) { const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', ...options }); const body = await res.json().catch(() => ({})); if (!res.ok || (typeof body.code === 'number' && body.code !== 0)) throw new Error((body?.data?.reason) || body?.message || `HTTP ${res.status}`); return body && body.data !== undefined ? body.data : body; }, async list(params = {}) { const q = new URLSearchParams({ limit: String(params.limit || 50), offset: String(params.offset || 0) }); if (params.class_id) q.set('class_id', String(params.class_id)); if (params.status) q.set('status', String(params.status)); if (params.keyword) q.set('keyword', String(params.keyword)); return this.request('/api/teacher/exams?' + q.toString()); }, async get(examId) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}`); }, async getQuestions(examId, { includeAnswer = false, includeAnalysis = false } = {}) { const q = new URLSearchParams({ include_answer: includeAnswer ? 'true' : 'false', include_analysis: includeAnalysis ? 'true' : 'false' }); return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}/questions?` + q.toString()); }, async createDraft(payload) { return this.request('/api/teacher/exams', { method: 'POST', body: JSON.stringify(payload) }); }, async update(examId, payload) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}`, { method: 'PATCH', body: JSON.stringify(payload) }); }, async publish(examId) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}/publish`, { method: 'POST', body: '{}' }); }, async unpublish(examId) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}/unpublish`, { method: 'POST', body: '{}' }); }, async end(examId) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}/end`, { method: 'POST', body: '{}' }); }, async archive(examId) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}/archive`, { method: 'POST', body: '{}' }); }, async remove(examId) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}`, { method: 'DELETE' }); }, async attempts(examId, { limit = 500, offset = 0 } = {}) { return this.request(`/api/teacher/exams/${encodeURIComponent(examId)}/attempts?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`); } };
+    function applyExamDetailState(exam) { const actions = getAvailableActions(exam); document.getElementById('btn-exam-update').disabled = !actions.canUpdate; document.getElementById('btn-exam-publish').disabled = !actions.canPublish; document.getElementById('btn-exam-end').disabled = !actions.canEnd; document.getElementById('btn-exam-unpublish').disabled = !actions.canUnpublish; document.getElementById('btn-exam-archive').disabled = !actions.canArchive; document.getElementById('btn-exam-delete').disabled = !actions.canDelete; const draftOnlyDisabled = exam.status !== 'draft'; document.getElementById('exam-detail-class').disabled = !isAssistant() || draftOnlyDisabled; document.getElementById('exam-detail-count').disabled = !isAssistant() || draftOnlyDisabled; document.getElementById('exam-detail-question-ids').disabled = !isAssistant() || draftOnlyDisabled; document.getElementById('exam-detail-allow-multiple').disabled = !isAssistant(); }
+    async function fillExamDetailQuestions(examId) { try { const payload = await ExamService.getQuestions(examId, { includeAnswer: false, includeAnalysis: false }); const ids = (payload.items || []).map(i => i.question_id).filter(Boolean); document.getElementById('exam-detail-question-ids').value = ids.join(','); } catch (_) { document.getElementById('exam-detail-question-ids').value = ''; } }
+    async function createExam() { const classId = document.getElementById('exam-filter-class').value.trim() || classSelect.value; if (!classId) throw new Error('请先选择班级'); const payload = { class_id: Number(classId), title: document.getElementById('exam-title').value.trim() || undefined, question_count: Number(document.getElementById('exam-count').value || 10), category: document.getElementById('exam-category').value.trim() || null, start_at: toIsoFromLocal(document.getElementById('exam-start-at').value), end_at: toIsoFromLocal(document.getElementById('exam-end-at').value) }; if (isAssistant()) { payload.allow_multiple_attempts = document.getElementById('exam-allow-multiple').checked; const qids = parseQuestionIdsInput(document.getElementById('exam-question-ids').value); if (qids) payload.question_ids = qids; } const data = await ExamService.createDraft(payload); document.getElementById('exam-id').value = data.exam_id; document.getElementById('progress-exam-id').value = data.exam_id; document.getElementById('stats-exam-id').value = data.exam_id; setExamActionStatus('草稿创建成功', true); await loadExams(); await loadExamDetail(data.exam_id); }
+    function createActionButton(text, className, onClick) { const btn = document.createElement('button'); btn.className = className; btn.type = 'button'; btn.textContent = text; btn.style.marginRight = '6px'; btn.addEventListener('click', (e) => { e.stopPropagation(); onClick(); }); return btn; }
+    async function runExamAction(action, exam) { const target = exam || currentExam; if (!target?.exam_id) return; const id = target.exam_id; const confirmTextMap = { unpublish: '确认撤回发布？', end: '确认结束考试？', archive: '确认归档该考试？', delete: '确认删除该考试？' }; if (confirmTextMap[action] && !confirm(confirmTextMap[action])) return; setExamActionStatus('正在执行操作...', true); let data = null; if (action === 'publish') data = await ExamService.publish(id); if (action === 'unpublish') data = await ExamService.unpublish(id); if (action === 'end') data = await ExamService.end(id); if (action === 'archive') data = await ExamService.archive(id); if (action === 'delete') data = await ExamService.remove(id); setExamActionStatus('操作成功', true); asJson(examJsonEl, data || {}, '考试操作结果'); await loadExams(); await loadExamDetail(id); }
+    async function loadExams() { const classId = document.getElementById('exam-filter-class').value.trim() || classSelect.value || ''; const status = document.getElementById('exam-filter-status').value.trim(); const keyword = document.getElementById('exam-filter-keyword').value.trim(); const data = await ExamService.list({ class_id: classId || undefined, status: status || undefined, keyword: keyword || undefined, limit: 50, offset: 0 }); examsBody.innerHTML = ''; (data.items || []).forEach((row) => { const tr = document.createElement('tr'); tr.innerHTML = `<td>${row.exam_id}</td><td>${row.title || '-'}</td><td>${row.class_name || row.class_id || '-'}</td><td>${row.question_count || 0}</td><td>${getStatusLabel(row)}</td><td>${row.start_at || '-'}</td><td>${row.end_at || '-'}</td><td>${row?.stats?.submitted_total ?? 0}</td><td></td>`; const actionsCell = tr.querySelector('td:last-child'); const actions = getAvailableActions(row); if (actions.canPublish) actionsCell.appendChild(createActionButton('发布', 'btn', () => runExamAction('publish', row).catch(e => setExamActionStatus(e.message, false)))); if (actions.canEnd) actionsCell.appendChild(createActionButton('结束', 'btn secondary', () => runExamAction('end', row).catch(e => setExamActionStatus(e.message, false)))); if (actions.canUnpublish) actionsCell.appendChild(createActionButton('撤回', 'btn secondary', () => runExamAction('unpublish', row).catch(e => setExamActionStatus(e.message, false)))); if (actions.canArchive) actionsCell.appendChild(createActionButton('归档', 'btn secondary', () => runExamAction('archive', row).catch(e => setExamActionStatus(e.message, false)))); if (actions.canDelete) actionsCell.appendChild(createActionButton('删除', 'btn danger', () => runExamAction('delete', row).catch(e => setExamActionStatus(e.message, false)))); if (!actionsCell.childElementCount) actionsCell.textContent = '-'; tr.addEventListener('click', async () => { document.getElementById('exam-id').value = row.exam_id; document.getElementById('progress-exam-id').value = row.exam_id; document.getElementById('stats-exam-id').value = row.exam_id; await loadExamDetail(row.exam_id); }); examsBody.appendChild(tr); }); setStatus('测验列表加载完成'); }
+    async function loadExamDetail(examIdOverride = '') { const id = (examIdOverride || document.getElementById('exam-id').value || '').trim(); if (!id) return; const exam = await ExamService.get(id); currentExam = exam; document.getElementById('exam-id').value = exam.exam_id; document.getElementById('progress-exam-id').value = exam.exam_id; document.getElementById('stats-exam-id').value = exam.exam_id; if (exam.class_id !== undefined && exam.class_id !== null) { document.getElementById('progress-class-id').value = exam.class_id; document.getElementById('stats-class-id').value = exam.class_id; } document.getElementById('exam-detail-title').value = exam.title || ''; document.getElementById('exam-detail-class').value = exam.class_id ?? ''; document.getElementById('exam-detail-count').value = exam.question_count ?? ''; document.getElementById('exam-detail-category').value = exam.category || ''; document.getElementById('exam-detail-start-at').value = toLocalFromIso(exam.start_at); document.getElementById('exam-detail-end-at').value = toLocalFromIso(exam.end_at); document.getElementById('exam-detail-allow-multiple').checked = !!exam.allow_multiple_attempts; document.getElementById('exam-detail-status').textContent = getStatusLabel(exam); document.getElementById('exam-detail-attempts').textContent = exam?.stats?.attempts_total ?? 0; document.getElementById('exam-detail-submitted').textContent = exam?.stats?.submitted_total ?? 0; document.getElementById('exam-detail-avg').textContent = exam?.stats?.avg_score ?? 0; await fillExamDetailQuestions(id); applyExamDetailState(exam); asJson(examJsonEl, exam, '考试详情'); }
+    async function updateExamFromDetail() { if (!currentExam?.exam_id) throw new Error('请先加载考试详情'); const payload = { title: document.getElementById('exam-detail-title').value.trim(), category: document.getElementById('exam-detail-category').value.trim() || null, start_at: toIsoFromLocal(document.getElementById('exam-detail-start-at').value), end_at: toIsoFromLocal(document.getElementById('exam-detail-end-at').value) }; if (isAssistant()) payload.allow_multiple_attempts = document.getElementById('exam-detail-allow-multiple').checked; if (isAssistant() && currentExam.status === 'draft') { payload.class_id = Number(document.getElementById('exam-detail-class').value || currentExam.class_id || 0); payload.question_count = Number(document.getElementById('exam-detail-count').value || currentExam.question_count || 0); const qids = parseQuestionIdsInput(document.getElementById('exam-detail-question-ids').value); if (qids) payload.question_ids = qids; } const data = await ExamService.update(currentExam.exam_id, payload); setExamActionStatus('考试信息已保存', true); asJson(examJsonEl, data, '保存结果'); await loadExams(); await loadExamDetail(currentExam.exam_id); }
+    async function loadExamQuestions() { const id = document.getElementById('exam-id').value.trim(); if (!id) return; asJson(examJsonEl, await ExamService.getQuestions(id, { includeAnswer: true, includeAnalysis: true }), '固定卷题目详情'); }
+    async function loadProgress({ silent = false } = {}) { if (progressBusy) return; const examId = document.getElementById('progress-exam-id').value.trim(); let classId = document.getElementById('progress-class-id').value.trim(); if (!examId) throw new Error('请先选择考试，再进入实时看板'); progressBusy = true; try { const exam = await ExamService.get(examId); currentExam = exam; classId = classId || String(exam.class_id || ''); if (!classId) throw new Error('当前考试缺少班级信息'); document.getElementById('progress-class-id').value = classId; document.getElementById('stats-class-id').value = classId; document.getElementById('stats-exam-id').value = exam.exam_id; const [students, attempts] = await Promise.all([ api(`/api/teacher/classes/${encodeURIComponent(classId)}/students?limit=500&offset=0`), ExamService.attempts(examId, { limit: 500, offset: 0 }) ]); renderProgressOverview(exam, students.items || [], attempts.items || []); if (!silent) setStatus('课堂实时看板已刷新'); } finally { progressBusy = false; } }
+    async function loadAttemptDetail() { const id = document.getElementById('attempt-id').value.trim(); if (!id) throw new Error('请先输入作答ID'); asJson(attemptJsonEl, await api(`/api/teacher/attempts/${encodeURIComponent(id)}?include_analysis=true`), '作答回放'); }
+    async function loadStats() { const examId = document.getElementById('stats-exam-id').value.trim() || document.getElementById('progress-exam-id').value.trim(); const classId = document.getElementById('stats-class-id').value.trim() || document.getElementById('progress-class-id').value.trim(); if (!examId) throw new Error('\u8bf7\u5148\u9009\u62e9\u8003\u8bd5\uff0c\u518d\u67e5\u770b\u6bcf\u9898\u7edf\u8ba1'); if (classId) document.getElementById('stats-class-id').value = classId; const data = await api(`/api/teacher/exams/${encodeURIComponent(examId)}/question_stats`); renderQuestionStats(data); setStatus('\u6bcf\u9898\u8bfe\u5802\u8bb2\u8bc4\u7edf\u8ba1\u5df2\u5237\u65b0'); }
+    document.querySelectorAll('#teacher-menu a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); switchPanel(a.dataset.panel); }));
     bindClick('btn-load-classes', () => loadClasses().catch(e => setStatus(e.message, false)));
     bindClick('btn-load-students', () => loadStudents().catch(e => setStatus(e.message, false)));
     bindClick('btn-create-exam', () => createExam().catch(e => setExamActionStatus(e.message, false)));
@@ -627,50 +297,15 @@
     bindClick('btn-load-exam-detail', () => loadExamDetail().catch(e => setExamActionStatus(e.message, false)));
     bindClick('btn-load-exam-questions', () => loadExamQuestions().catch(e => setExamActionStatus(e.message, false)));
     bindClick('btn-exam-update', () => updateExamFromDetail().catch(e => setExamActionStatus(e.message, false)));
-    bindClick('btn-exam-publish', () => publishFromDetail().catch(e => setExamActionStatus(e.message, false)));
-    bindClick('btn-exam-unpublish', () => runExamAction('unpublish').catch(e => setExamActionStatus(e.message, false)));
+    bindClick('btn-exam-publish', () => runExamAction('publish').catch(e => setExamActionStatus(e.message, false)));
     bindClick('btn-exam-end', () => runExamAction('end').catch(e => setExamActionStatus(e.message, false)));
+    bindClick('btn-exam-unpublish', () => runExamAction('unpublish').catch(e => setExamActionStatus(e.message, false)));
     bindClick('btn-exam-archive', () => runExamAction('archive').catch(e => setExamActionStatus(e.message, false)));
     bindClick('btn-exam-delete', () => runExamAction('delete').catch(e => setExamActionStatus(e.message, false)));
-    bindClick('btn-load-scores', () => loadScores().catch(e => setStatus(e.message, false)));
-    bindClick('btn-student-overview', () => loadStudentOverview().catch(e => setStatus(e.message, false)));
-    bindClick('btn-student-attempts', () => loadStudentAttempts().catch(e => setStatus(e.message, false)));
-    bindClick('btn-student-wrongs', () => loadStudentWrongs().catch(e => setStatus(e.message, false)));
-    bindClick('btn-student-analysis', () => loadStudentAnalysis().catch(e => setStatus(e.message, false)));
+    bindClick('btn-load-progress', () => loadProgress().catch(e => setStatus(e.message, false)));
     bindClick('btn-attempt-detail', () => loadAttemptDetail().catch(e => setStatus(e.message, false)));
-    bindClick('btn-practice', () => createPractice().catch(e => setStatus(e.message, false)));
-    bindClick('btn-load-practices', () => loadPractices().catch(e => setStatus(e.message, false)));
-    bindClick('btn-load-effects', () => loadPracticeEffects().catch(e => setStatus(e.message, false)));
-    bindClick('btn-export-scores', () => exportScores().catch(e => setStatus(e.message, false)));
-    bindClick('btn-export-wrongs', () => exportWrongs().catch(e => setStatus(e.message, false)));
-
-    if (classSelect) {
-      classSelect.addEventListener('change', () => {
-        document.getElementById('scores-class-id').value = classSelect.value;
-        document.getElementById('analysis-class-id').value = classSelect.value;
-        if (!document.getElementById('exam-filter-class').value) {
-          document.getElementById('exam-filter-class').value = classSelect.value;
-        }
-      });
-    }
-
-    (async function init() {
-      try {
-        smartOutput.renderEmpty(examJsonEl);
-        smartOutput.renderEmpty(document.getElementById('student-json'));
-        smartOutput.renderEmpty(document.getElementById('effects-json'));
-        await loadProfile();
-        await loadClasses();
-        if (classSelect.value) {
-          document.getElementById('exam-filter-class').value = classSelect.value;
-        }
-        await loadStudents();
-        await loadExams();
-        await loadPractices();
-      } catch (e) {
-        setStatus(`初始化失败：${e.message}`, false);
-      }
-    })();
+    bindClick('btn-load-stats', () => loadStats().catch(e => setStatus(e.message, false)));
+    (async function init() { switchPanel(normalizePanelFromHash(), { updateHash: false }); smartOutput.renderEmpty(examJsonEl); smartOutput.renderEmpty(attemptJsonEl); await loadProfile(); await loadClasses(); await loadStudents(); await loadExams(); setStatus('初始化完成'); })().catch((e) => setStatus(e.message, false));
   </script>
 </body>
 </html>

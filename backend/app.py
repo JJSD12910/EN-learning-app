@@ -1,6 +1,6 @@
 import json
-import uuid
 import sqlite3
+import uuid
 
 from flask import Flask, g, request
 from sqlalchemy import func
@@ -8,7 +8,7 @@ from werkzeug.exceptions import HTTPException
 
 from .api_response import api_error, is_api_path
 from .auth import resolve_user
-from .db import Base, DATA_DIR, engine, get_session, DB_FILE
+from .db import Base, DATA_DIR, DB_FILE, engine, get_session
 from .migrations import run_migrations
 from .models import ClientUser, Question, Record, User
 from .routes import bp
@@ -93,10 +93,13 @@ def import_if_empty():
                     session.commit()
                 except Exception:
                     session.rollback()
-        # Ensure at least one teacher account exists for role separation
         teacher_exists = session.query(User).filter(User.role == "teacher").first()
         if not teacher_exists:
             session.add(User(username="teacher", password="teacher123", role="teacher"))
+            session.commit()
+        assistant_exists = session.query(User).filter(User.role == "assistant").first()
+        if not assistant_exists:
+            session.add(User(username="assistant", password="assistant123", role="assistant"))
             session.commit()
     finally:
         session.close()

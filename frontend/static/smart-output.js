@@ -14,7 +14,7 @@
     class_name: "Class",
     student_id: "Student ID",
     student_no: "Student No",
-    client_username: "Device User",
+    client_username: "Student Account",
     teacher_username: "Teacher",
     score: "Score",
     total: "Total",
