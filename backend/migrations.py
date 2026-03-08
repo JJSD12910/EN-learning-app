@@ -3,7 +3,7 @@ import sqlite3
 from .db import DB_FILE
 
 
-LATEST_VERSION = 14
+LATEST_VERSION = 15
 
 
 def _table_exists(cur, table_name: str) -> bool:
@@ -806,6 +806,34 @@ def _migration_13_attempt_progress(cur):
         cur.execute("UPDATE attempts SET progress_count=0 WHERE progress_count IS NULL")
 
 
+def _migration_15_session_principal_type(cur):
+    sessions_cols = _table_columns(cur, "sessions")
+    _rebuild_table(
+        cur,
+        "sessions",
+        """
+        CREATE TABLE {table} (
+            token TEXT NOT NULL PRIMARY KEY,
+            user TEXT NOT NULL,
+            principal_type TEXT NOT NULL DEFAULT 'user',
+            ts REAL NOT NULL
+        )
+        """,
+        ["token", "user", "principal_type", "ts"],
+        [
+            _coalesce_expr(sessions_cols, "token", "''"),
+            _coalesce_expr(sessions_cols, "user", "''"),
+            "'user'",
+            _coalesce_expr(sessions_cols, "ts", "0"),
+        ],
+    )
+    cur.execute("DELETE FROM sessions")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_principal_type ON sessions(principal_type)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_principal_type ON sessions(user, principal_type)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_ts ON sessions(ts)")
+
+
 MIGRATIONS = [
     (1, _migration_1_schema_version),
     (2, _migration_2_questions_category),
@@ -821,6 +849,7 @@ MIGRATIONS = [
     (12, _migration_12_roles_and_teacher_validity),
     (13, _migration_13_attempt_progress),
     (14, _migration_14_wrong_training_config),
+    (15, _migration_15_session_principal_type),
 ]
 
 
