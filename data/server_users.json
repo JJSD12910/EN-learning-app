@@ -1,22 +1,22 @@
 [
   {
     "username": "2025",
-    "password": "",
+    "password": "2025",
     "role": "admin"
   },
   {
     "username": "admin",
-    "password": "",
+    "password": "admin123",
     "role": "admin"
   },
   {
     "username": "assistant",
-    "password": "",
+    "password": "assistant123",
     "role": "assistant"
   },
   {
     "username": "teacher",
-    "password": "",
+    "password": "teacher123",
     "role": "teacher"
   }
 ]

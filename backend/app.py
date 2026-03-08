@@ -1,18 +1,45 @@
 import json
 import sqlite3
 import uuid
-from secrets import token_urlsafe
-
 from flask import Flask, g, request
 from sqlalchemy import func
 from werkzeug.exceptions import HTTPException
+from werkzeug.security import check_password_hash
 
 from .api_response import api_error, is_api_path
-from .auth import ensure_password_hash, resolve_user
+from .auth import ensure_password_hash, is_password_hashed, resolve_user
 from .db import Base, DATA_DIR, DB_FILE, engine, get_session
 from .migrations import run_migrations
 from .models import ClientUser, Question, Record, User
 from .routes import bp
+
+
+DEFAULT_SERVER_PASSWORDS = {
+    "2025": "2025",
+    "admin": "admin123",
+    "assistant": "assistant123",
+    "teacher": "teacher123",
+}
+DEFAULT_CLIENT_PASSWORDS = {
+    "001": "666",
+}
+
+
+def resolve_seed_password(username, provided_password, defaults):
+    raw_password = str(provided_password or '').strip()
+    if raw_password:
+        return raw_password
+    return defaults.get(username, '')
+
+
+def password_matches(stored_password, raw_password):
+    stored = str(stored_password or '')
+    candidate = str(raw_password or '')
+    if not stored or not candidate:
+        return False
+    if is_password_hashed(stored):
+        return check_password_hash(stored, candidate)
+    return stored == candidate
 
 
 def ensure_user_role_column():
@@ -34,13 +61,6 @@ def ensure_user_role_column():
 
 
 def import_if_empty():
-    bootstrap_credentials = {}
-
-    def make_bootstrap_password(label: str) -> str:
-        password = token_urlsafe(12)
-        bootstrap_credentials[label] = password
-        return password
-
     session = get_session()
     try:
         if session.query(func.count(User.id)).scalar() == 0:
@@ -49,7 +69,9 @@ def import_if_empty():
                 users = json.loads(from_file.read_text(encoding='utf-8'))
                 for u in users:
                     username = str(u.get('username') or '').strip()
-                    raw_password = str(u.get('password') or '').strip() or make_bootstrap_password(f'user_{username}')
+                    if not username:
+                        continue
+                    raw_password = resolve_seed_password(username, u.get('password'), DEFAULT_SERVER_PASSWORDS) or username
                     session.add(
                         User(
                             username=username,
@@ -58,7 +80,7 @@ def import_if_empty():
                         )
                     )
             else:
-                session.add(User(username='admin', password=ensure_password_hash(make_bootstrap_password('admin')), role='admin'))
+                session.add(User(username='admin', password=ensure_password_hash(DEFAULT_SERVER_PASSWORDS['admin']), role='admin'))
             session.commit()
         if session.query(func.count(ClientUser.id)).scalar() == 0:
             from_file = DATA_DIR / 'client_users.json'
@@ -66,10 +88,12 @@ def import_if_empty():
                 users = json.loads(from_file.read_text(encoding='utf-8'))
                 for u in users:
                     username = str(u.get('username') or '').strip()
-                    raw_password = str(u.get('password') or '').strip() or make_bootstrap_password(f'client_{username}')
+                    if not username:
+                        continue
+                    raw_password = resolve_seed_password(username, u.get('password'), DEFAULT_CLIENT_PASSWORDS) or username
                     session.add(ClientUser(username=username, password=ensure_password_hash(raw_password)))
             else:
-                session.add(ClientUser(username='001', password=ensure_password_hash(make_bootstrap_password('client_001'))))
+                session.add(ClientUser(username='001', password=ensure_password_hash(DEFAULT_CLIENT_PASSWORDS['001'])))
             session.commit()
         if session.query(func.count(Question.id)).scalar() == 0:
             from_file = DATA_DIR / 'questions.json'
@@ -113,16 +137,54 @@ def import_if_empty():
                     session.rollback()
         teacher_exists = session.query(User).filter(User.role == 'teacher').first()
         if not teacher_exists:
-            session.add(User(username='teacher', password=ensure_password_hash(make_bootstrap_password('teacher')), role='teacher'))
+            session.add(User(username='teacher', password=ensure_password_hash(DEFAULT_SERVER_PASSWORDS['teacher']), role='teacher'))
             session.commit()
         assistant_exists = session.query(User).filter(User.role == 'assistant').first()
         if not assistant_exists:
-            session.add(User(username='assistant', password=ensure_password_hash(make_bootstrap_password('assistant')), role='assistant'))
+            session.add(User(username='assistant', password=ensure_password_hash(DEFAULT_SERVER_PASSWORDS['assistant']), role='assistant'))
             session.commit()
-        if bootstrap_credentials:
-            bootstrap_file = DATA_DIR / 'bootstrap_credentials.json'
-            if not bootstrap_file.exists():
-                bootstrap_file.write_text(json.dumps(bootstrap_credentials, ensure_ascii=False, indent=2), encoding='utf-8')
+    finally:
+        session.close()
+
+
+def sync_seed_account_passwords():
+    session = get_session()
+    try:
+        changed = False
+        server_file = DATA_DIR / 'server_users.json'
+        if server_file.exists():
+            users = json.loads(server_file.read_text(encoding='utf-8'))
+            for u in users:
+                username = str(u.get('username') or '').strip()
+                if not username:
+                    continue
+                raw_password = resolve_seed_password(username, u.get('password'), DEFAULT_SERVER_PASSWORDS) or username
+                row = session.query(User).filter(User.username == username).first()
+                if not row:
+                    continue
+                desired_role = str(u.get('role') or '').strip() or row.role or 'admin'
+                if row.role != desired_role:
+                    row.role = desired_role
+                    changed = True
+                if not password_matches(getattr(row, 'password', ''), raw_password):
+                    row.password = ensure_password_hash(raw_password)
+                    changed = True
+        client_file = DATA_DIR / 'client_users.json'
+        if client_file.exists():
+            users = json.loads(client_file.read_text(encoding='utf-8'))
+            for u in users:
+                username = str(u.get('username') or '').strip()
+                if not username:
+                    continue
+                raw_password = resolve_seed_password(username, u.get('password'), DEFAULT_CLIENT_PASSWORDS) or username
+                row = session.query(ClientUser).filter(ClientUser.username == username).first()
+                if not row:
+                    continue
+                if not password_matches(getattr(row, 'password', ''), raw_password):
+                    row.password = ensure_password_hash(raw_password)
+                    changed = True
+        if changed:
+            session.commit()
     finally:
         session.close()
 
@@ -156,6 +218,7 @@ def create_app():
     Base.metadata.create_all(bind=engine)
     run_migrations()
     import_if_empty()
+    sync_seed_account_passwords()
     normalize_password_storage()
 
     @app.before_request
