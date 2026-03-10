@@ -1,6 +1,5 @@
 ﻿import csv
 import json
-import time
 import uuid
 import zipfile
 from contextlib import contextmanager
@@ -28,7 +27,6 @@ from .models import (
     Exam,
     ExamQuestion,
     Question,
-    Record,
     School,
     SchoolClass,
     SessionToken,
@@ -38,9 +36,7 @@ from .models import (
 )
 
 DEFAULT_QUESTION_COUNT = 10
-ACTIVE_QUIZZES: Dict[str, Dict[str, object]] = {}
 EXPORT_DIR = DATA_DIR / "exports"
-QUIZ_SESSION_TTL_SECONDS = 300
 WRONG_CLEAR_STREAK = 3
 WRONG_TRAINING_CONFIG_KEY = "wrong_training_v2"
 DEFAULT_WRONG_TRAINING_CONFIG = {"daily_total_count": 10, "reinforcement_count": 3, "mastery_streak": WRONG_CLEAR_STREAK}
@@ -57,6 +53,7 @@ HTTP_ERROR_CODE_MAP = {
     404: 40401,
     422: 42201,
     409: 40901,
+    410: 41001,
     500: 50001,
 }
 
@@ -73,19 +70,18 @@ def question_to_dict(q: Question, include_answer: bool = False) -> Dict:
     }
     if include_answer:
         payload["answer"] = q.answer
+        payload["correct_index"] = q.answer
     return payload
 
 
-def record_to_dict(r: Record) -> Dict:
+def client_question_to_dict(q: Question, question_no: int) -> Dict:
     return {
-        "id": r.id,
-        "timestamp": r.timestamp,
-        "client_ip": r.client_ip,
-        "user_id": r.user_id,
-        "quiz_id": r.quiz_id,
-        "score": r.score,
-        "total": r.total,
-        "wrong": json.loads(r.wrong or "[]"),
+        "question_id": q.id,
+        "question_no": int(question_no),
+        "stem": q.stem,
+        "options": json.loads(q.options or "[]"),
+        "category": getattr(q, "category", None),
+        "analysis": getattr(q, "analysis", None),
     }
 
 
@@ -782,11 +778,13 @@ def finalize_attempt_submission(attempt: Attempt, exam: Exam, profile: StudentPr
     if not question_ids:
         return None, v1_error("invalid params", status=400, code=40001, reason="exam has no questions")
 
+    question_no_map = {qid: idx for idx, qid in enumerate(question_ids, start=1)}
     saved_rows = g.db.query(AttemptAnswer).filter(AttemptAnswer.attempt_id == attempt.id).all()
     saved_map = {row.question_id: row for row in saved_rows}
     submitted_at = utc_now_iso()
     score = 0
     total = 0
+    wrong_items = []
     wrong_training_config = load_wrong_training_config(g.db)
     mastery_streak = int(wrong_training_config.get("mastery_streak") or WRONG_CLEAR_STREAK)
     final_duration = parse_int(duration_sec, None)
@@ -801,9 +799,9 @@ def finalize_attempt_submission(attempt: Attempt, exam: Exam, profile: StudentPr
                 continue
             total += 1
             saved_row = saved_map.get(question_id)
-            your_value = int(saved_row.choice) if saved_row is not None else -1
-            correct = int(question.answer)
-            is_correct = 1 if your_value == correct else 0
+            selected_index = int(saved_row.choice) if saved_row is not None else -1
+            correct_index = int(question.answer)
+            is_correct = 1 if selected_index == correct_index else 0
             avg_cost_ms = estimate_avg_cost_ms(final_duration, len(question_ids))
             wrong_row = (
                 g.db.query(WrongQuestion)
@@ -822,6 +820,14 @@ def finalize_attempt_submission(attempt: Attempt, exam: Exam, profile: StudentPr
                     if next_streak >= mastery_streak:
                         wrong_row.is_active = 0
             else:
+                wrong_items.append(
+                    {
+                        **client_question_to_dict(question, question_no_map.get(question_id, total)),
+                        "selected_index": selected_index,
+                        "correct_index": correct_index,
+                        "is_correct": False,
+                    }
+                )
                 if wrong_row:
                     wrong_row.wrong_count = int(wrong_row.wrong_count or 0) + 1
                     wrong_row.correct_streak = 0
@@ -849,8 +855,8 @@ def finalize_attempt_submission(attempt: Attempt, exam: Exam, profile: StudentPr
                     id=uuid.uuid4().hex,
                     attempt_id=attempt.id,
                     question_id=question_id,
-                    your=your_value,
-                    correct=correct,
+                    your=selected_index,
+                    correct=correct_index,
                     is_correct=is_correct,
                 )
             )
@@ -864,8 +870,10 @@ def finalize_attempt_submission(attempt: Attempt, exam: Exam, profile: StudentPr
         "attempt_id": attempt.id,
         "score": score,
         "total": total,
+        "wrong_count": len(wrong_items),
         "accuracy": normalized_accuracy(score, total),
         "submitted_at": attempt.submitted_at,
+        "wrong_items": wrong_items,
     }, None
 
 
@@ -971,13 +979,13 @@ def teacher_page():
 @bp.route("/submit", methods=["GET"])
 @login_required(api=False)
 def submit_page():
-    return send_from_directory(FRONTEND_DIR, "submit.html")
+    return redirect("/")
 
 
 @bp.route("/records", methods=["GET"])
 @login_required(api=False)
 def records_page():
-    return send_from_directory(FRONTEND_DIR, "records.html")
+    return redirect("/")
 
 
 @bp.route("/admin", methods=["GET"])
@@ -991,163 +999,25 @@ def admin_page():
 @login_required(api=True)
 @role_required(["client"])
 def questions():
-    try:
-        user_id = getattr(g, "current_user", None)
-        if not user_id:
-            return jsonify({"error": "unauthorized"}), 401
-        count_param = request.args.get("count")
-        category = (request.args.get("category") or "").strip() or None
-        try:
-            max_count = g.db.query(Question).filter(Question.category == category).count() if category else g.db.query(Question).count()
-            count_int = min(max_count, max(1, int(count_param))) if count_param else DEFAULT_QUESTION_COUNT
-        except (TypeError, ValueError):
-            count_int = DEFAULT_QUESTION_COUNT
-        quiz_id = uuid.uuid4().hex
-        questions = pick_questions(g.db, count_int, category=category)
-        question_ids = [q.id for q in questions]
-        ACTIVE_QUIZZES[quiz_id] = {
-            "user_id": user_id,
-            "ts": time.time(),
-            "count": len(question_ids),
-            "question_ids": question_ids,
-        }
-        return jsonify(
-            {
-                "user_id": user_id,
-                "quiz_id": quiz_id,
-                "questions": [question_to_dict(q, include_answer=False) for q in questions],
-                "total": len(questions),
-                "bank_size": g.db.query(Question).count(),
-            }
-        )
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 400
+    return v1_error("gone", status=410, reason="legacy quiz question api has been removed; use /api/client/exams/<exam_id>/start")
 
 
 @bp.route("/records.json")
 @login_required(api=True)
 def records_json():
-    limit_val, offset_val = parse_pagination(default_limit=20, max_limit=500)
-    query = g.db.query(Record).order_by(Record.timestamp.desc())
-    total = query.count()
-    records = query.offset(offset_val).limit(limit_val).all()
-    return jsonify({"records": [record_to_dict(r) for r in records], "total": total, "limit": limit_val, "offset": offset_val})
+    return v1_error("gone", status=410, reason="legacy records api has been removed; use /api/admin/attempts")
 
 
 @bp.route("/results.json")
 @login_required(api=True)
 def results_json():
-    rid = request.args.get("id")
-    client_ip = request.remote_addr
-    record: Optional[Record] = None
-    if rid:
-        record = g.db.query(Record).filter(Record.id == rid).first()
-    else:
-        record = g.db.query(Record).filter(Record.client_ip == client_ip).order_by(Record.timestamp.desc()).first()
-    if record:
-        return jsonify({"record": record_to_dict(record)})
-    return jsonify({"error": "no record found"}), 404
+    return v1_error("gone", status=410, reason="legacy results api has been removed; use /api/client/attempts/<attempt_id>/submit")
 
 
 @bp.route("/submit", methods=["POST"])
 @login_required(api=True)
 def submit():
-    data = request.get_json(silent=True)
-    if data is None:
-        return jsonify({"error": "invalid json"}), 400
-
-    user_id = getattr(g, "current_user", None)
-    request_user_id = data.get("user_id")
-    quiz_id = data.get("quiz_id")
-    answers = data.get("answers")
-
-    if not user_id or not quiz_id:
-        return jsonify({"error": "quiz_id is required"}), 400
-    if request_user_id and str(request_user_id) != str(user_id):
-        return jsonify({"error": "user_id mismatch"}), 403
-
-    if not isinstance(answers, list):
-        return jsonify({"error": "answers array required"}), 400
-
-    entry = ACTIVE_QUIZZES.get(quiz_id)
-    if not entry:
-        return jsonify({"error": "quiz_id not found"}), 400
-
-    if entry["user_id"] != user_id:
-        return jsonify({"error": "user_id mismatch"}), 403
-
-    if time.time() - entry["ts"] > QUIZ_SESSION_TTL_SECONDS:
-        del ACTIVE_QUIZZES[quiz_id]
-        return jsonify({"error": "quiz expired"}), 403
-
-    expected_question_ids = entry.get("question_ids") or []
-    if not isinstance(expected_question_ids, list) or not expected_question_ids:
-        return jsonify({"error": "quiz session is invalid"}), 400
-
-    graded = grade_submission(answers, expected_question_ids)
-    if graded.get("error"):
-        return jsonify({"error": graded["error"]}), 400
-    score_val = graded["score"]
-    wrong_list = graded["wrong"]
-    total_val = graded["total"]
-
-    print(f"[submit] user={user_id}, quiz_id={quiz_id}, score={score_val}")
-    del ACTIVE_QUIZZES[quiz_id]
-
-    client_ip = request.remote_addr or "unknown"
-    record_id = store_score_record(g.db, user_id, quiz_id, score_val, total_val, client_ip, wrong_list)
-    return jsonify({"status": "ok", "record_id": record_id})
-
-
-def grade_submission(answers, expected_question_ids):
-    expected_ids = [str(qid) for qid in (expected_question_ids or []) if qid is not None]
-    expected_set = set(expected_ids)
-    if not expected_set:
-        return {"error": "quiz session has no questions"}
-
-    answer_map = {}
-    for answer in answers or []:
-        if not isinstance(answer, dict):
-            return {"error": "answers must be objects"}
-        qid = str(answer.get("id") or "").strip()
-        if not qid:
-            return {"error": "answer id is required"}
-        if qid not in expected_set:
-            return {"error": "answers contain invalid question id"}
-        if qid in answer_map:
-            return {"error": "duplicate question answers are not allowed"}
-        answer_map[qid] = answer.get("choice")
-
-    total = len(expected_ids)
-    correct = 0
-    wrong = []
-    for qid in expected_ids:
-        choice = answer_map.get(qid)
-        question = g.db.query(Question).filter(Question.id == qid).first()
-        if question is None:
-            continue
-        if choice == question.answer:
-            correct += 1
-        else:
-            wrong.append({"id": qid, "correct": question.answer, "your": choice})
-    return {"score": correct, "total": total, "wrong": wrong}
-
-
-def store_score_record(db: Session, user_id: str, quiz_id: str, score: int, total: int, client_ip: str, wrong=None):
-    record_id = uuid.uuid4().hex
-    record = Record(
-        id=record_id,
-        timestamp=utc_now_iso(),
-        client_ip=client_ip,
-        user_id=user_id,
-        quiz_id=quiz_id,
-        score=score,
-        total=total,
-        wrong=json.dumps(wrong or [], ensure_ascii=False),
-    )
-    db.add(record)
-    db.commit()
-    return record_id
+    return v1_error("gone", status=410, reason="legacy quiz submit api has been removed; use /api/client/attempts/<attempt_id>/submit")
 
 
 @bp.route("/api/questions/bank")
@@ -1336,14 +1206,7 @@ def delete_question(qid):
 @login_required(api=True)
 @role_required(["assistant"])
 def clear_records():
-    data = request.get_json(silent=True) or {}
-    confirm_resp = require_confirm_phrase(data, "CLEAR_RECORDS")
-    if confirm_resp:
-        return confirm_resp
-    with transactional(g.db):
-        deleted = g.db.query(Record).delete()
-        add_audit_log("CLEAR_RECORDS", target_type="records", target_id="all", detail={"cleared": int(deleted or 0)})
-    return api_ok({"cleared": deleted})
+    return api_error("legacy records api has been removed", status=410)
 
 
 def _find_teacher(username: str) -> Optional[User]:
@@ -2218,7 +2081,9 @@ def admin_attempt_detail(attempt_id):
             "stem": question.stem,
             "options": json.loads(question.options or "[]"),
             "your": row.your,
+            "selected_index": row.your,
             "correct": row.correct,
+            "correct_index": row.correct,
             "is_correct": bool(row.is_correct),
             "category": question.category,
         }
@@ -3005,18 +2870,20 @@ def teacher_exam_questions(exam_id):
     questions = g.db.query(Question).filter(Question.id.in_(qids)).all() if qids else []
     qmap = {q.id: q for q in questions}
     items = []
-    for qid in qids:
+    for index, qid in enumerate(qids, start=1):
         question = qmap.get(qid)
         if not question:
             continue
         item = {
             "question_id": question.id,
+            "question_no": index,
             "stem": question.stem,
             "options": json.loads(question.options or "[]"),
             "category": question.category,
         }
         if include_answer:
             item["answer"] = question.answer
+            item["correct_index"] = int(question.answer)
         if include_analysis:
             item["analysis"] = question.analysis
         items.append(item)
@@ -3259,17 +3126,10 @@ def client_start_exam(exam_id):
     questions = g.db.query(Question).filter(Question.id.in_(question_ids)).all() if question_ids else []
     qmap = {q.id: q for q in questions}
     payload_questions = []
-    for qid in question_ids:
-        q = qmap.get(qid)
-        if q:
-            payload_questions.append(
-                {
-                    "question_id": q.id,
-                    "stem": q.stem,
-                    "options": json.loads(q.options or "[]"),
-                    "category": q.category,
-                }
-            )
+    for index, qid in enumerate(question_ids, start=1):
+        question = qmap.get(qid)
+        if question:
+            payload_questions.append(client_question_to_dict(question, index))
     return v1_ok({"attempt_id": attempt.id, "exam_id": exam.id, "items": payload_questions})
 
 
@@ -3334,13 +3194,13 @@ def client_save_attempt_answer(attempt_id):
 
     data = request.get_json(silent=True) or {}
     question_id = str(data.get("question_id") or "").strip()
-    choice = parse_int(data.get("choice"), None)
+    selected_index = parse_int(data.get("selected_index"), None)
     progress_count = parse_int(data.get("progress_count"), None)
     duration_sec = parse_int(data.get("duration_sec"), None) if data.get("duration_sec") is not None else None
     if not question_id:
         return v1_error("invalid params", status=400, code=40001, reason="question_id is required")
-    if choice is None:
-        return v1_error("invalid params", status=400, code=40001, reason="choice is required")
+    if selected_index is None:
+        return v1_error("invalid params", status=400, code=40001, reason="selected_index is required")
     if progress_count is None:
         return v1_error("invalid params", status=400, code=40001, reason="progress_count is required")
     if duration_sec is not None and duration_sec < 0:
@@ -3351,8 +3211,8 @@ def client_save_attempt_answer(attempt_id):
     if question_id not in question_ids or not question:
         return v1_error("question not found", status=404, code=40403, reason="question not found in exam")
     options = json.loads(question.options or "[]")
-    if choice < 0 or choice > 3 or choice >= len(options):
-        return v1_error("invalid params", status=400, code=40001, reason="choice must be an integer index between 0 and 3")
+    if selected_index < 0 or selected_index >= len(options):
+        return v1_error("invalid params", status=400, code=40001, reason="selected_index must be an integer index between 0 and len(options)-1")
 
     question_count = len([qid for qid in question_ids if qid in question_map])
     progress_count = max(0, min(progress_count, question_count))
@@ -3361,7 +3221,7 @@ def client_save_attempt_answer(attempt_id):
             attempt=attempt,
             exam=exam,
             question_id=question_id,
-            choice=choice,
+            choice=selected_index,
             progress_count=progress_count,
             duration_sec=duration_sec,
         )
@@ -3369,12 +3229,13 @@ def client_save_attempt_answer(attempt_id):
         {
             "attempt_id": attempt.id,
             "question_id": question_id,
-            "choice": int(choice),
+            "selected_index": int(selected_index),
             "progress_count": normalized_progress,
             "question_count": question_count,
             "saved_at": saved_at,
         }
     )
+
 
 @bp.route("/api/client/attempts/<attempt_id>/submit", methods=["POST"])
 @login_required(api=True)
@@ -3611,7 +3472,9 @@ def teacher_attempt_detail(attempt_id):
             "stem": question.stem,
             "options": json.loads(question.options or "[]"),
             "your": row.your,
+            "selected_index": row.your,
             "correct": row.correct,
+            "correct_index": row.correct,
             "is_correct": bool(row.is_correct),
             "category": question.category,
         }
@@ -3703,6 +3566,7 @@ def teacher_student_wrongs(student_id):
                 "last_seen_at": getattr(wrong, "last_seen_at", None),
                 "avg_cost_ms": parse_int(getattr(wrong, "avg_cost_ms", None), None),
                 "correct": question.answer,
+                "correct_index": question.answer,
                 "analysis": question.analysis,
             }
         )
