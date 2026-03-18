@@ -1,3 +1,7 @@
+> Legacy archive note
+>
+> This document describes an older standalone `backend/quiz_server.py` implementation and legacy routes such as `/submit`, `/records.json`, and `/results.json`. It is kept only as a historical code snapshot and does not reflect the current Flask route behavior in `backend/routes.py`.
+
 ## backend/quiz_server.py
 ```python
 """

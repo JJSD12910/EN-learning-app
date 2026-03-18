@@ -4,10 +4,11 @@
 - backend/quiz_server.py : HTTP server entry; serves API + frontend
 - frontend/login.html : login gate before accessing other pages (route `/login`).
 - frontend/home.html : dashboard for fetching question sets (route `/`).
-- frontend/submit.html : submission demo (route `/submit`).
-- frontend/records.html : recent submission viewer (route `/records`).
-- data/questions.json : unified English question bank (>=20 items).
-- data/exam_records.json : submission log appended on every `/submit` call.
+- frontend/admin.html : admin console (route `/admin`).
+- frontend/assistant.html : assistant console (route `/assistant`).
+- frontend/teacher.html : teacher/assistant classroom console (route `/teacher`).
+- data/questions.json : unified question bank.
+- data/exam_records.json : historical legacy record seed file.
 - data/server_users.json : account list for 服务器端登录页 `/login`。
 - data/client_users.json : account list for 客户端登录接口 `/client/login`。
 
@@ -52,36 +53,19 @@ Listens on `0.0.0.0:8000`; open `http://<ip>:8000/` in a browser.
   - 默认会在缺失时创建包含 `{"username":"001","password":"666"}` 的文件。格式统一：`[{"username":"...","password":"..."}]`。
 
 ## APIs
-- GET `/questions?count=10`
-  - Returns a random sample. `count` defaults to 10 and is capped at the bank size.
-  - Response example:
-    ```json
-    {
-      "questions": [{ "id": "Q1", "stem": "..." }],
-      "total": 10,
-      "bank_size": 20
-    }
-    ```
-- POST `/submit`
-  - Body: `{ "answers": [ { "id": "Q1", "choice": 0 }, ... ] }`
-  - Response: `{ "score": 8, "total": 10, "wrong": [ { "id": "Q5", "correct": 2, "your": 0 } ] }`
-  - Every submission is appended to `data/exam_records.json` with timestamp and client IP.
-- GET `/records.json?limit=20`
-  - Returns latest submissions (newest first); `limit` defaults to 20.
-  - Response example:
-    ```json
-    {
-      "records": [
-        { "timestamp": "...", "client_ip": "1.2.3.4", "score": 8, "total": 10, "wrong": [] }
-      ],
-      "total": 20
-    }
-    ```
+- GET `/api/client/exams`
+  - Returns available exams for the authenticated client account.
+- POST `/api/client/exams/<exam_id>/start`
+  - Starts or resumes an attempt and returns attempt context plus questions.
+- POST `/api/client/attempts/<attempt_id>/progress`
+  - Saves per-question progress during answering.
+- POST `/api/client/attempts/<attempt_id>/submit`
+  - Final submission endpoint for client attempts.
 
 ## Frontend tips
 - `/` lets you set a question count and instantly preview the JSON response.
-- `/submit` pre-fills a payload; the "load sample" button fetches 3 questions and builds a template you can tweak.
-- `/records` shows recent submissions and raw JSON; use the limit input to control how many are loaded.
+- `/assistant` is the main operational console for assistants.
+- `/teacher` is the classroom live board and results console for teachers and assistants.
 
 ## Customization
 - Add/edit questions in `data/questions.json` (keep the same keys/types).

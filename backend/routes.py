@@ -976,49 +976,11 @@ def teacher_page():
     return send_from_directory(FRONTEND_DIR, "teacher.html")
 
 
-@bp.route("/submit", methods=["GET"])
-@login_required(api=False)
-def submit_page():
-    return redirect("/")
-
-
-@bp.route("/records", methods=["GET"])
-@login_required(api=False)
-def records_page():
-    return redirect("/")
-
-
 @bp.route("/admin", methods=["GET"])
 @login_required(api=False)
 @role_required(["admin"], api=False)
 def admin_page():
     return send_from_directory(FRONTEND_DIR, "admin.html")
-
-
-@bp.route("/questions")
-@login_required(api=True)
-@role_required(["client"])
-def questions():
-    return v1_error("gone", status=410, reason="legacy quiz question api has been removed; use /api/client/exams/<exam_id>/start")
-
-
-@bp.route("/records.json")
-@login_required(api=True)
-def records_json():
-    return v1_error("gone", status=410, reason="legacy records api has been removed; use /api/admin/attempts")
-
-
-@bp.route("/results.json")
-@login_required(api=True)
-def results_json():
-    return v1_error("gone", status=410, reason="legacy results api has been removed; use /api/client/attempts/<attempt_id>/submit")
-
-
-@bp.route("/submit", methods=["POST"])
-@login_required(api=True)
-def submit():
-    return v1_error("gone", status=410, reason="legacy quiz submit api has been removed; use /api/client/attempts/<attempt_id>/submit")
-
 
 @bp.route("/api/questions/bank")
 @login_required(api=True)
@@ -1200,13 +1162,6 @@ def delete_question(qid):
     if not deleted:
         return api_error("not found", status=404)
     return api_ok()
-
-
-@bp.route("/api/records/clear", methods=["POST"])
-@login_required(api=True)
-@role_required(["assistant"])
-def clear_records():
-    return api_error("legacy records api has been removed", status=410)
 
 
 def _find_teacher(username: str) -> Optional[User]:
