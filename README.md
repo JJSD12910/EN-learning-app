@@ -27,17 +27,12 @@
 - `/admin`
 - `/assistant`
 - `/teacher`
-- `/submit`
-- `/records`
 
 ### 常用接口
 
 - `GET /auth/status`
 - `POST /login`
 - `POST /client/login`
-- `GET /questions`
-- `POST /submit`
-- `GET /records.json`
 - `GET /api/client/exams`
 - `POST /api/client/exams/<exam_id>/start`
 - `POST /api/client/attempts/<attempt_id>/progress`
@@ -120,4 +115,4 @@ python -m venv .venv
 
 - `docs/README.md`
 - `docs/用户说明手册.md`
-- `docs/server_code_document.md`
+- `docs/server_code_document.md`（旧版实现归档，不代表当前运行逻辑）
