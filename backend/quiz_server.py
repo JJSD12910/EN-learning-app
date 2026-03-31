@@ -18,7 +18,12 @@ app = create_app()
 
 
 def run():
-    app.run(host=HOST, port=PORT)
+    try:
+        from waitress import serve
+    except ImportError:
+        app.run(host=HOST, port=PORT, threaded=True)
+        return
+    serve(app, host=HOST, port=PORT, threads=16)
 
 
 if __name__ == "__main__":

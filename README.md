@@ -56,7 +56,7 @@ start_server.bat
 
 ```bash
 python -m venv .venv
-.venv\Scripts\python -m pip install flask sqlalchemy
+.venv\Scripts\python -m pip install flask sqlalchemy waitress
 .venv\Scripts\python backend/quiz_server.py
 ```
 
@@ -102,6 +102,8 @@ python -m venv .venv
 
 ## 8. 故障排查
 
+- 当前服务端会优先使用 `waitress` 运行；如果环境中未安装 `waitress`，会自动退回 Flask 自带线程模式
+- SQLite 连接已启用 `WAL`、`busy_timeout` 等参数，适合局域网小规模并发设备作答
 - 启动报导入错误时，先确认使用 `.venv` 解释器，并执行：
 
 ```powershell
