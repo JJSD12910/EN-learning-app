@@ -572,6 +572,10 @@ def wrong_training_priority_label() -> str:
     return "最近做错 > 错误次数 > 历史耗时 > 普通题补足"
 
 
+def correct_review_priority_label() -> str:
+    return "最近做对 > 正确次数 > 普通题补足"
+
+
 def _wrong_last_seen_sort_key(value: Optional[str]):
     return (1, value or "") if value else (0, "")
 
@@ -602,6 +606,44 @@ def estimate_avg_cost_ms(duration_sec: Optional[int], total_questions: int) -> O
     except (TypeError, ValueError):
         return None
     return int((seconds * 1000) / max(1, total_questions))
+
+
+def load_correct_review_question_ids(
+    db: Session,
+    student_id: int,
+    count: int,
+    *,
+    category: Optional[str] = None,
+    exclude_question_ids: Optional[Sequence[str]] = None,
+) -> List[str]:
+    if count <= 0:
+        return []
+    query = (
+        db.query(
+            Answer.question_id.label("question_id"),
+            func.max(Attempt.submitted_at).label("last_correct_at"),
+            func.count(Answer.id).label("correct_count"),
+        )
+        .join(Attempt, Attempt.id == Answer.attempt_id)
+        .join(Question, Question.id == Answer.question_id)
+        .filter(Attempt.student_profile_id == student_id, Answer.is_correct == 1)
+    )
+    if category:
+        query = query.filter(Question.category == category)
+    excluded = [str(qid) for qid in (exclude_question_ids or []) if qid]
+    if excluded:
+        query = query.filter(~Answer.question_id.in_(excluded))
+    rows = query.group_by(Answer.question_id).all()
+    ranked = sorted(
+        rows,
+        key=lambda row: (
+            row.last_correct_at or "",
+            int(row.correct_count or 0),
+            str(row.question_id or ""),
+        ),
+        reverse=True,
+    )
+    return [str(row.question_id) for row in ranked[:count] if row.question_id]
 
 
 def parse_client_answer_mapping(raw_answers) -> Dict[str, Optional[int]]:
@@ -3636,10 +3678,22 @@ def teacher_student_wrongs_practice(student_id):
         wrong_rows_query = wrong_rows_query.filter(Question.category == category)
     wrong_rows = sort_wrong_training_candidates(wrong_rows_query.all())
     active_wrong_ids = [question.id for _wrong, question in wrong_rows]
-
     selected_wrong_pairs = wrong_rows[:reinforcement_count] if wrong_training_enabled else []
     selected_wrong_ids = [question.id for _wrong, question in selected_wrong_pairs]
-    selected_ids = list(selected_wrong_ids)
+    selected_correct_ids = []
+    review_source = "wrong_questions" if wrong_training_enabled else "correct_history"
+    review_source_label = "错题强化" if wrong_training_enabled else "做对题回顾"
+    priority_rule = wrong_training_priority_label() if wrong_training_enabled else correct_review_priority_label()
+    if not wrong_training_enabled:
+        selected_correct_ids = load_correct_review_question_ids(
+            g.db,
+            student.id,
+            reinforcement_count,
+            category=category,
+            exclude_question_ids=active_wrong_ids,
+        )
+    selected_review_ids = list(selected_wrong_ids if wrong_training_enabled else selected_correct_ids)
+    selected_ids = list(selected_review_ids)
     selected_set = set(selected_ids)
 
     all_question_query = g.db.query(Question.id)
@@ -3649,7 +3703,7 @@ def teacher_student_wrongs_practice(student_id):
     preferred_regular_ids = [qid for qid in all_question_ids if qid not in selected_set and qid not in set(active_wrong_ids)]
     fallback_regular_ids = [qid for qid in all_question_ids if qid not in selected_set and qid not in preferred_regular_ids]
 
-    fallback_needed = max(0, reinforcement_count - len(selected_wrong_ids))
+    fallback_needed = max(0, reinforcement_count - len(selected_review_ids))
     regular_target = regular_count + fallback_needed
     regular_selected = _pick_random_question_ids(preferred_regular_ids, regular_target)
     if len(regular_selected) < regular_target:
@@ -3707,12 +3761,15 @@ def teacher_student_wrongs_practice(student_id):
             detail={
                 "student_id": student.id,
                 "wrong_training_enabled": wrong_training_enabled,
+                "review_source": review_source,
                 "daily_total_count": total_count,
                 "regular_count": regular_count,
                 "reinforcement_count": reinforcement_count,
                 "selected_wrong_count": len(selected_wrong_ids),
-                "selected_regular_count": len(selected_ids) - len(selected_wrong_ids),
-                "fallback_count": max(0, reinforcement_count - len(selected_wrong_ids)),
+                "selected_correct_count": len(selected_correct_ids),
+                "selected_review_count": len(selected_review_ids),
+                "selected_regular_count": len(selected_ids) - len(selected_review_ids),
+                "fallback_count": max(0, reinforcement_count - len(selected_review_ids)),
                 "mastery_streak": runtime_config["mastery_streak"],
                 "strategy": strategy,
             },
@@ -3724,15 +3781,19 @@ def teacher_student_wrongs_practice(student_id):
             "type": "practice",
             "student_id": student.id,
             "wrong_training_enabled": wrong_training_enabled,
+            "review_source": review_source,
+            "review_source_label": review_source_label,
             "daily_total_count": total_count,
             "regular_count": regular_count,
             "reinforcement_count": reinforcement_count,
             "selected_wrong_count": len(selected_wrong_ids),
-            "selected_regular_count": len(selected_ids) - len(selected_wrong_ids),
-            "fallback_count": max(0, reinforcement_count - len(selected_wrong_ids)),
+            "selected_correct_count": len(selected_correct_ids),
+            "selected_review_count": len(selected_review_ids),
+            "selected_regular_count": len(selected_ids) - len(selected_review_ids),
+            "fallback_count": max(0, reinforcement_count - len(selected_review_ids)),
             "selected_count": len(selected_ids),
             "strategy": strategy,
-            "priority_rule": wrong_training_priority_label(),
+            "priority_rule": priority_rule,
             "mastery_streak": runtime_config["mastery_streak"],
             "created_at": now_str,
         }
